@@ -166,11 +166,13 @@ std::vector<std::string> Validate(const Destination &destination)
 	if (destination.mode == DestinationMode::Direct) {
 		if (destination.service.empty())
 			errors.emplace_back("direct destination service is empty");
+		if (!destination.multitrackConfigurationUrl.empty())
+			errors.emplace_back("direct destination has a multitrack configuration url");
 		if (!destination.managedRouteId.empty())
 			errors.emplace_back("direct destination has a managed route id");
 	} else {
-		if (destination.managedRouteId.empty())
-			errors.emplace_back("managed destination route id is empty");
+		if (destination.multitrackConfigurationUrl.empty())
+			errors.emplace_back("managed destination multitrack configuration url is empty");
 	}
 
 	return errors;
@@ -247,6 +249,7 @@ void to_json(json &value, const Destination &destination)
 		     {"mode", ToString(destination.mode)},
 		     {"service", destination.service},
 		     {"server", destination.server},
+		     {"multitrack_configuration_url", destination.multitrackConfigurationUrl},
 		     {"managed_route_id", destination.managedRouteId},
 		     {"priority", destination.priority},
 		     {"enabled", destination.enabled}};
@@ -259,6 +262,7 @@ void from_json(const json &value, Destination &destination)
 	destination.mode = DestinationModeFromString(value.value("mode", std::string{"direct"}));
 	destination.service = value.value("service", std::string{});
 	destination.server = value.value("server", std::string{});
+	destination.multitrackConfigurationUrl = value.value("multitrack_configuration_url", std::string{});
 	destination.managedRouteId = value.value("managed_route_id", std::string{});
 	destination.priority = value.value("priority", 0U);
 	destination.enabled = value.value("enabled", true);
