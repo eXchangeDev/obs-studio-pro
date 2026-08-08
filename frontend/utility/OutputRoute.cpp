@@ -100,6 +100,21 @@ void AppendErrors(std::vector<std::string> &target, std::vector<std::string> sou
 		target.emplace_back(prefix + error);
 }
 
+struct CanvasResolverContext {
+	const CanvasReference &reference;
+	obs_canvas_t *match = nullptr;
+};
+
+bool ResolveCanvasCallback(void *data, obs_canvas_t *canvas)
+{
+	auto *context = static_cast<CanvasResolverContext *>(data);
+	if (!CanvasReferenceMatches(context->reference, canvas))
+		return true;
+
+	context->match = obs_canvas_get_ref(canvas);
+	return false;
+}
+
 } // namespace
 
 CanvasReference CanvasReferenceFromCanvas(const obs_canvas_t *canvas)
@@ -129,6 +144,16 @@ bool CanvasReferenceMatches(const CanvasReference &reference, const obs_canvas_t
 	return !reference.name.empty() && name && reference.name == name;
 }
 
+obs_canvas_t *ResolveCanvas(const CanvasReference &reference)
+{
+	if (reference.uuid.empty() && reference.name.empty())
+		return nullptr;
+
+	CanvasResolverContext context{reference};
+	obs_enum_canvases(ResolveCanvasCallback, &context);
+	return context.match;
+}
+
 std::vector<std::string> Validate(const Destination &destination)
 {
 	std::vector<std::string> errors;
@@ -141,7 +166,7 @@ std::vector<std::string> Validate(const Destination &destination)
 	if (destination.mode == DestinationMode::Direct) {
 		if (destination.service.empty())
 			errors.emplace_back("direct destination service is empty");
-		if (destination.managedRouteId.size())
+		if (!destination.managedRouteId.empty())
 			errors.emplace_back("direct destination has a managed route id");
 	} else {
 		if (destination.managedRouteId.empty())
