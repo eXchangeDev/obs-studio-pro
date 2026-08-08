@@ -27,7 +27,7 @@
 
 namespace OBS::Output {
 
-constexpr uint32_t RouteSchemaVersion = 2;
+constexpr uint32_t RouteSchemaVersion = 1;
 
 enum class Kind {
 	Stream,
@@ -35,16 +35,10 @@ enum class Kind {
 	VirtualCamera,
 };
 
-enum class DestinationMode {
-	Direct,
-	ManagedRoute,
-};
-
 enum class FailoverMode {
 	None,
 	ClientSequential,
 	ClientParallel,
-	ServerManaged,
 };
 
 struct CanvasReference {
@@ -55,20 +49,12 @@ struct CanvasReference {
 struct Destination {
 	std::string id;
 	std::string name;
-	DestinationMode mode = DestinationMode::Direct;
 
-	// Direct destinations are resolved through OBS' existing service layer.
+	// Destinations are resolved through OBS' existing service/output layer.
+	// A relay or external failover service is intentionally just another
+	// destination from OBS' point of view.
 	std::string service;
 	std::string server;
-
-	// Managed destinations use OBS' existing Go Live / multitrack configuration
-	// protocol. The control plane returns the ingest endpoint and encoder ladder.
-	// Credentials intentionally do not live in this route model.
-	std::string multitrackConfigurationUrl;
-
-	// Optional stable project/route identifier for control-plane status and
-	// lifecycle APIs. Keepline's single-tenant MVP does not require this yet.
-	std::string managedRouteId;
 
 	uint32_t priority = 0;
 	bool enabled = true;
@@ -85,6 +71,8 @@ struct Route {
 	std::string audioEncoderId;
 	uint32_t audioMix = 0;
 
+	// This models failover that OBS itself performs. Any redundancy behind a
+	// relay/server endpoint remains an implementation detail of that service.
 	FailoverMode failoverMode = FailoverMode::None;
 	std::vector<Destination> destinations;
 	bool enabled = true;
