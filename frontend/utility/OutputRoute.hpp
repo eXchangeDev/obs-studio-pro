@@ -27,7 +27,7 @@
 
 namespace OBS::Output {
 
-constexpr uint32_t RouteSchemaVersion = 1;
+constexpr uint32_t RouteSchemaVersion = 2;
 
 enum class Kind {
 	Stream,
@@ -61,8 +61,13 @@ struct Destination {
 	std::string service;
 	std::string server;
 
-	// Managed destinations are resolved by an external routing/control plane.
-	// Credentials intentionally do not live in this model.
+	// Managed destinations use OBS' existing Go Live / multitrack configuration
+	// protocol. The control plane returns the ingest endpoint and encoder ladder.
+	// Credentials intentionally do not live in this route model.
+	std::string multitrackConfigurationUrl;
+
+	// Optional stable project/route identifier for control-plane status and
+	// lifecycle APIs. Keepline's single-tenant MVP does not require this yet.
 	std::string managedRouteId;
 
 	uint32_t priority = 0;
