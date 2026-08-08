@@ -93,6 +93,9 @@ struct RouteSet {
 CanvasReference CanvasReferenceFromCanvas(const obs_canvas_t *canvas);
 bool CanvasReferenceMatches(const CanvasReference &reference, const obs_canvas_t *canvas);
 
+// Returns a strong reference. Caller must release it with obs_canvas_release().
+obs_canvas_t *ResolveCanvas(const CanvasReference &reference);
+
 std::vector<std::string> Validate(const Destination &destination);
 std::vector<std::string> Validate(const Route &route);
 std::vector<std::string> Validate(const RouteSet &routes);
