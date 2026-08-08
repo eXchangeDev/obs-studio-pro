@@ -1,6 +1,7 @@
 #pragma once
 
 #include <utility/MultitrackVideoOutput.hpp>
+#include <utility/OutputRouteRuntime.hpp>
 #include <utility/WHIPSimulcastEncoders.hpp>
 
 #include <obs.hpp>
@@ -45,6 +46,7 @@ struct BasicOutputHandler {
 	obs_sceneitem_t *vCamSourceSceneItem = nullptr;
 
 	std::unique_ptr<WHIPSimulcastEncoders> whipSimulcastEncoders;
+	OBS::Output::Runtime outputRoutes;
 
 	std::string outputType;
 	std::string lastError;
@@ -89,6 +91,10 @@ struct BasicOutputHandler {
 	virtual void Update() = 0;
 	virtual void SetupOutputs() = 0;
 
+	bool PrepareOutputRoutes(obs_output_t *referenceOutput);
+	size_t StartOutputRoutes();
+	void StopOutputRoutes(bool force = false);
+
 	virtual void UpdateVirtualCamOutputSource();
 	virtual void DestroyVirtualCamView();
 	virtual void DestroyVirtualCameraScene();
@@ -96,7 +102,7 @@ struct BasicOutputHandler {
 	inline bool Active() const
 	{
 		return streamingActive || recordingActive || delayActive || replayBufferActive || virtualCamActive ||
-		       multitrackVideoActive;
+		       multitrackVideoActive || outputRoutes.Active();
 	}
 
 protected:

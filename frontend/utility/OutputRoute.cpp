@@ -43,10 +43,12 @@ const char *ToString(Kind kind)
 
 Kind KindFromString(const std::string &value)
 {
-	if (value == "recording")
+	if (value == "recording") {
 		return Kind::Recording;
-	if (value == "virtual_camera")
+	}
+	if (value == "virtual_camera") {
 		return Kind::VirtualCamera;
+	}
 	return Kind::Stream;
 }
 
@@ -66,17 +68,20 @@ const char *ToString(FailoverMode mode)
 
 FailoverMode FailoverModeFromString(const std::string &value)
 {
-	if (value == "client_sequential")
+	if (value == "client_sequential") {
 		return FailoverMode::ClientSequential;
-	if (value == "client_parallel")
+	}
+	if (value == "client_parallel") {
 		return FailoverMode::ClientParallel;
+	}
 	return FailoverMode::None;
 }
 
 void AppendErrors(std::vector<std::string> &target, std::vector<std::string> source, const std::string &prefix)
 {
-	for (auto &error : source)
+	for (auto &error : source) {
 		target.emplace_back(prefix + error);
+	}
 }
 
 struct CanvasResolverContext {
@@ -87,8 +92,9 @@ struct CanvasResolverContext {
 bool ResolveCanvasCallback(void *data, obs_canvas_t *canvas)
 {
 	auto *context = static_cast<CanvasResolverContext *>(data);
-	if (!CanvasReferenceMatches(context->reference, canvas))
+	if (!CanvasReferenceMatches(context->reference, canvas)) {
 		return true;
+	}
 
 	context->match = obs_canvas_get_ref(canvas);
 	return false;
@@ -99,25 +105,30 @@ bool ResolveCanvasCallback(void *data, obs_canvas_t *canvas)
 CanvasReference CanvasReferenceFromCanvas(const obs_canvas_t *canvas)
 {
 	CanvasReference reference;
-	if (!canvas)
+	if (!canvas) {
 		return reference;
+	}
 
-	if (const char *uuid = obs_canvas_get_uuid(canvas))
+	if (const char *uuid = obs_canvas_get_uuid(canvas)) {
 		reference.uuid = uuid;
-	if (const char *name = obs_canvas_get_name(canvas))
+	}
+	if (const char *name = obs_canvas_get_name(canvas)) {
 		reference.name = name;
+	}
 
 	return reference;
 }
 
 bool CanvasReferenceMatches(const CanvasReference &reference, const obs_canvas_t *canvas)
 {
-	if (!canvas)
+	if (!canvas) {
 		return false;
+	}
 
 	const char *uuid = obs_canvas_get_uuid(canvas);
-	if (!reference.uuid.empty() && uuid)
+	if (!reference.uuid.empty() && uuid) {
 		return reference.uuid == uuid;
+	}
 
 	const char *name = obs_canvas_get_name(canvas);
 	return !reference.name.empty() && name && reference.name == name;
@@ -125,8 +136,9 @@ bool CanvasReferenceMatches(const CanvasReference &reference, const obs_canvas_t
 
 obs_canvas_t *ResolveCanvas(const CanvasReference &reference)
 {
-	if (reference.uuid.empty() && reference.name.empty())
+	if (reference.uuid.empty() && reference.name.empty()) {
 		return nullptr;
+	}
 
 	CanvasResolverContext context{reference};
 	obs_enum_canvases(ResolveCanvasCallback, &context);
@@ -137,12 +149,18 @@ std::vector<std::string> Validate(const Destination &destination)
 {
 	std::vector<std::string> errors;
 
-	if (destination.id.empty())
+	if (destination.id.empty()) {
 		errors.emplace_back("destination id is empty");
-	if (destination.name.empty())
+	}
+	if (destination.name.empty()) {
 		errors.emplace_back("destination name is empty");
-	if (destination.service.empty())
+	}
+	if (destination.service.empty()) {
 		errors.emplace_back("destination service is empty");
+	}
+	if (destination.server.empty()) {
+		errors.emplace_back("destination server is empty");
+	}
 
 	return errors;
 }
@@ -151,22 +169,28 @@ std::vector<std::string> Validate(const Route &route)
 {
 	std::vector<std::string> errors;
 
-	if (route.id.empty())
+	if (route.id.empty()) {
 		errors.emplace_back("route id is empty");
-	if (route.name.empty())
+	}
+	if (route.name.empty()) {
 		errors.emplace_back("route name is empty");
-	if (route.canvas.uuid.empty() && route.canvas.name.empty())
+	}
+	if (route.canvas.uuid.empty() && route.canvas.name.empty()) {
 		errors.emplace_back("route has no canvas reference");
-	if (route.audioMix >= MAX_AUDIO_MIXES)
+	}
+	if (route.audioMix >= MAX_AUDIO_MIXES) {
 		errors.emplace_back("route audio mix is out of range");
-	if (route.kind == Kind::Stream && route.destinations.empty())
+	}
+	if (route.kind == Kind::Stream && route.destinations.empty()) {
 		errors.emplace_back("stream route has no destinations");
+	}
 
 	std::unordered_set<std::string> destinationIds;
 	for (size_t index = 0; index < route.destinations.size(); ++index) {
 		const auto &destination = route.destinations[index];
-		if (!destination.id.empty() && !destinationIds.insert(destination.id).second)
+		if (!destination.id.empty() && !destinationIds.insert(destination.id).second) {
 			errors.emplace_back("duplicate destination id: " + destination.id);
+		}
 		AppendErrors(errors, Validate(destination), "destination[" + std::to_string(index) + "]: ");
 	}
 
@@ -177,14 +201,16 @@ std::vector<std::string> Validate(const RouteSet &routes)
 {
 	std::vector<std::string> errors;
 
-	if (routes.schemaVersion != RouteSchemaVersion)
+	if (routes.schemaVersion != RouteSchemaVersion) {
 		errors.emplace_back("unsupported route schema version");
+	}
 
 	std::unordered_set<std::string> routeIds;
 	for (size_t index = 0; index < routes.routes.size(); ++index) {
 		const auto &route = routes.routes[index];
-		if (!route.id.empty() && !routeIds.insert(route.id).second)
+		if (!route.id.empty() && !routeIds.insert(route.id).second) {
 			errors.emplace_back("duplicate route id: " + route.id);
+		}
 		AppendErrors(errors, Validate(route), "route[" + std::to_string(index) + "]: ");
 	}
 
@@ -207,8 +233,13 @@ void to_json(json &value, const Destination &destination)
 	value = json{{"id", destination.id},
 		     {"name", destination.name},
 		     {"service", destination.service},
+		     {"service_name", destination.serviceName},
 		     {"server", destination.server},
+		     {"stream_key", destination.streamKey},
+		     {"username", destination.username},
+		     {"password", destination.password},
 		     {"priority", destination.priority},
+		     {"use_authentication", destination.useAuthentication},
 		     {"enabled", destination.enabled}};
 }
 
@@ -216,9 +247,14 @@ void from_json(const json &value, Destination &destination)
 {
 	destination.id = value.value("id", std::string{});
 	destination.name = value.value("name", std::string{});
-	destination.service = value.value("service", std::string{});
+	destination.service = value.value("service", std::string{"rtmp_custom"});
+	destination.serviceName = value.value("service_name", std::string{});
 	destination.server = value.value("server", std::string{});
+	destination.streamKey = value.value("stream_key", std::string{});
+	destination.username = value.value("username", std::string{});
+	destination.password = value.value("password", std::string{});
 	destination.priority = value.value("priority", 0U);
+	destination.useAuthentication = value.value("use_authentication", false);
 	destination.enabled = value.value("enabled", true);
 }
 
@@ -259,6 +295,23 @@ void from_json(const json &value, RouteSet &routes)
 {
 	routes.schemaVersion = value.value("schema_version", RouteSchemaVersion);
 	routes.routes = value.value("routes", std::vector<Route>{});
+}
+
+std::string Serialize(const RouteSet &routes)
+{
+	return json(routes).dump();
+}
+
+bool Deserialize(std::string_view value, RouteSet &routes, std::string &error)
+{
+	try {
+		routes = json::parse(value).get<RouteSet>();
+		error.clear();
+		return true;
+	} catch (const json::exception &exception) {
+		error = exception.what();
+		return false;
+	}
 }
 
 } // namespace OBS::Output

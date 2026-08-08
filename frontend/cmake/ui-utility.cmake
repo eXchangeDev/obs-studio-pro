@@ -39,6 +39,8 @@ target_sources(
     utility/OBSTranslator.hpp
     utility/OutputRoute.cpp
     utility/OutputRoute.hpp
+    utility/OutputRouteRuntime.cpp
+    utility/OutputRouteRuntime.hpp
     utility/PreviewProgramSizeObserver.cpp
     utility/PreviewProgramSizeObserver.hpp
     utility/QuickTransition.cpp

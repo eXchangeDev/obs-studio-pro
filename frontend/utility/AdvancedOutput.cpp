@@ -660,6 +660,7 @@ std::shared_future<void> AdvancedOutput::SetupStreaming(obs_service_t *service,
 	auto handle_multitrack_video_result = [this, type = std::string{type}, is_multitrack_output,
 					       multiTrackAudioMixes](std::optional<bool> multitrackVideoResult) {
 		if (multitrackVideoResult.has_value()) {
+			outputRoutes.Clear();
 			return multitrackVideoResult.value();
 		}
 
@@ -707,6 +708,7 @@ std::shared_future<void> AdvancedOutput::SetupStreaming(obs_service_t *service,
 			}
 		}
 
+		PrepareOutputRoutes(streamOutput);
 		return true;
 	};
 
@@ -767,6 +769,9 @@ bool AdvancedOutput::StartStreaming(obs_service_t *service)
 		SetupVodTrack(service);
 	}
 	if (obs_output_start(streamOutput)) {
+		if (!multitrackVideo || !multitrackVideoActive) {
+			StartOutputRoutes();
+		}
 		if (multitrackVideo && multitrackVideoActive) {
 			multitrackVideo->StartedStreaming();
 		}
@@ -939,6 +944,7 @@ bool AdvancedOutput::StartReplayBuffer()
 
 void AdvancedOutput::StopStreaming(bool force)
 {
+	StopOutputRoutes(force);
 	auto output = StreamingOutput();
 	if (force && output) {
 		obs_output_force_stop(output);

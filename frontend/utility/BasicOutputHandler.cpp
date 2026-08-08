@@ -61,6 +61,7 @@ void OBSStopStreaming(void *data, calldata_t *params)
 	BasicOutputHandler *output = static_cast<BasicOutputHandler *>(data);
 	int code = (int)calldata_int(params, "code");
 	const char *last_error = calldata_string(params, "last_error");
+	output->StopOutputRoutes(false);
 
 	QString arg_last_error = QString::fromUtf8(last_error);
 
@@ -245,6 +246,70 @@ BasicOutputHandler::BasicOutputHandler(OBSBasic *main_) : main(main_)
 	if (config_get_int(main->Config(), "Stream1", "WHIPSimulcastTotalLayers") > 1) {
 		whipSimulcastEncoders = make_unique<WHIPSimulcastEncoders>();
 	}
+}
+
+bool BasicOutputHandler::PrepareOutputRoutes(obs_output_t *referenceOutput)
+{
+	const char *serialized = config_get_string(main->Config(), "Stream1", "OutputRoutes");
+	if (!serialized || !*serialized) {
+		outputRoutes.Clear();
+		return true;
+	}
+
+	OBS::Output::RouteSet routes;
+	std::string error;
+	if (!OBS::Output::Deserialize(serialized, routes, error)) {
+		blog(LOG_WARNING, "OBS Studio Pro: failed to parse additional output routes: %s", error.c_str());
+		return false;
+	}
+
+	OBS::Output::RuntimeOptions options;
+	const char *bindIp = config_get_string(main->Config(), "Output", "BindIP");
+	const char *ipFamily = config_get_string(main->Config(), "Output", "IPFamily");
+	if (bindIp && *bindIp) {
+		options.bindIp = bindIp;
+	}
+	if (ipFamily && *ipFamily) {
+		options.ipFamily = ipFamily;
+	}
+
+	if (config_get_bool(main->Config(), "Output", "Reconnect")) {
+		options.reconnectRetryCount = config_get_int(main->Config(), "Output", "MaxRetries");
+		options.reconnectRetrySeconds = config_get_int(main->Config(), "Output", "RetryDelay");
+	} else {
+		options.reconnectRetryCount = 0;
+	}
+
+	if (config_get_bool(main->Config(), "Output", "DelayEnable")) {
+		options.delaySeconds = config_get_int(main->Config(), "Output", "DelaySec");
+		if (config_get_bool(main->Config(), "Output", "DelayPreserve")) {
+			options.delayFlags = OBS_OUTPUT_DELAY_PRESERVE;
+		}
+	}
+
+	if (!outputRoutes.Prepare(routes, referenceOutput, options, error)) {
+		blog(LOG_WARNING, "OBS Studio Pro: failed to prepare additional outputs: %s", error.c_str());
+		return false;
+	}
+
+	blog(LOG_INFO, "OBS Studio Pro: prepared %zu additional output destination(s)",
+	     outputRoutes.PreparedDestinationCount());
+	return true;
+}
+
+size_t BasicOutputHandler::StartOutputRoutes()
+{
+	const size_t started = outputRoutes.Start();
+	if (outputRoutes.PreparedDestinationCount() > 0) {
+		blog(LOG_INFO, "OBS Studio Pro: started %zu of %zu additional output destination(s)", started,
+		     outputRoutes.PreparedDestinationCount());
+	}
+	return started;
+}
+
+void BasicOutputHandler::StopOutputRoutes(bool force)
+{
+	outputRoutes.Stop(force);
 }
 
 extern void log_vcam_changed(const VCamConfig &config, bool starting);

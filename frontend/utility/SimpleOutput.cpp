@@ -632,6 +632,7 @@ std::shared_future<void> SimpleOutput::SetupStreaming(obs_service_t *service, Se
 	auto handle_multitrack_video_result = [this, type = std::string{type},
 					       service](std::optional<bool> multitrackVideoResult) {
 		if (multitrackVideoResult.has_value()) {
+			outputRoutes.Clear();
 			return multitrackVideoResult.value();
 		}
 
@@ -667,6 +668,7 @@ std::shared_future<void> SimpleOutput::SetupStreaming(obs_service_t *service, Se
 		}
 		obs_output_set_audio_encoder(streamOutput, audioStreaming, 0);
 		obs_output_set_service(streamOutput, service);
+		PrepareOutputRoutes(streamOutput);
 		return true;
 	};
 
@@ -744,6 +746,9 @@ bool SimpleOutput::StartStreaming(obs_service_t *service)
 	}
 
 	if (obs_output_start(streamOutput)) {
+		if (!multitrackVideo || !multitrackVideoActive) {
+			StartOutputRoutes();
+		}
 		if (multitrackVideo && multitrackVideoActive) {
 			multitrackVideo->StartedStreaming();
 		}
@@ -922,6 +927,7 @@ bool SimpleOutput::StartReplayBuffer()
 
 void SimpleOutput::StopStreaming(bool force)
 {
+	StopOutputRoutes(force);
 	auto output = StreamingOutput();
 	if (force && output) {
 		obs_output_force_stop(output);

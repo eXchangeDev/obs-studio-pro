@@ -37,6 +37,7 @@
 #include <dialogs/OBSBasicInteraction.hpp>
 #include <dialogs/OBSBasicProperties.hpp>
 #include <dialogs/OBSBasicTransform.hpp>
+#include <dialogs/OBSOutputRoutes.hpp>
 #include <models/SceneCollection.hpp>
 #include <settings/OBSBasicSettings.hpp>
 #include <utility/QuickTransition.hpp>
@@ -591,6 +592,12 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	actionGroup->addAction(ui->actionSceneListMode);
 	actionGroup->addAction(ui->actionSceneGridMode);
 
+	QAction *outputRoutesAction = ui->menuTools->addAction(QTStr("OBSPro.OutputRoutes.Menu"));
+	connect(outputRoutesAction, &QAction::triggered, this, [this]() {
+		OBSOutputRoutesDialog dialog(this);
+		dialog.exec();
+	});
+
 	UpdatePreviewSafeAreas();
 	UpdatePreviewSpacingHelpers();
 	UpdatePreviewOverflowSettings();
@@ -744,6 +751,7 @@ bool OBSBasic::InitBasicConfigDefaults()
 
 	config_set_default_bool(activeConfiguration, "Stream1", "IgnoreRecommended", false);
 	config_set_default_bool(activeConfiguration, "Stream1", "EnableMultitrackVideo", false);
+	config_set_default_string(activeConfiguration, "Stream1", "OutputRoutes", "");
 	config_set_default_bool(activeConfiguration, "Stream1", "MultitrackVideoMaximumAggregateBitrateAuto", true);
 	config_set_default_bool(activeConfiguration, "Stream1", "MultitrackVideoMaximumVideoTracksAuto", true);
 

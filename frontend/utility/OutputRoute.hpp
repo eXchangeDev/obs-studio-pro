@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <nlohmann/json_fwd.hpp>
@@ -50,13 +51,19 @@ struct Destination {
 	std::string id;
 	std::string name;
 
-	// Destinations are resolved through OBS' existing service/output layer.
-	// A relay or external failover service is intentionally just another
-	// destination from OBS' point of view.
-	std::string service;
+	// Destinations are resolved through OBS' existing service/output layer. A
+	// relay or external failover service is intentionally just another
+	// destination from OBS' point of view. The default works for Twitch,
+	// YouTube and relay endpoints when their RTMP URL and stream key are known.
+	std::string service = "rtmp_custom";
+	std::string serviceName;
 	std::string server;
+	std::string streamKey;
+	std::string username;
+	std::string password;
 
 	uint32_t priority = 0;
+	bool useAuthentication = false;
 	bool enabled = true;
 };
 
@@ -101,5 +108,8 @@ void to_json(nlohmann::json &json, const Route &route);
 void from_json(const nlohmann::json &json, Route &route);
 void to_json(nlohmann::json &json, const RouteSet &routes);
 void from_json(const nlohmann::json &json, RouteSet &routes);
+
+std::string Serialize(const RouteSet &routes);
+bool Deserialize(std::string_view value, RouteSet &routes, std::string &error);
 
 } // namespace OBS::Output
