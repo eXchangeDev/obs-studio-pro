@@ -50,23 +50,6 @@ Kind KindFromString(const std::string &value)
 	return Kind::Stream;
 }
 
-const char *ToString(DestinationMode mode)
-{
-	switch (mode) {
-	case DestinationMode::Direct:
-		return "direct";
-	case DestinationMode::ManagedRoute:
-		return "managed_route";
-	}
-
-	return "direct";
-}
-
-DestinationMode DestinationModeFromString(const std::string &value)
-{
-	return value == "managed_route" ? DestinationMode::ManagedRoute : DestinationMode::Direct;
-}
-
 const char *ToString(FailoverMode mode)
 {
 	switch (mode) {
@@ -76,8 +59,6 @@ const char *ToString(FailoverMode mode)
 		return "client_sequential";
 	case FailoverMode::ClientParallel:
 		return "client_parallel";
-	case FailoverMode::ServerManaged:
-		return "server_managed";
 	}
 
 	return "none";
@@ -89,8 +70,6 @@ FailoverMode FailoverModeFromString(const std::string &value)
 		return FailoverMode::ClientSequential;
 	if (value == "client_parallel")
 		return FailoverMode::ClientParallel;
-	if (value == "server_managed")
-		return FailoverMode::ServerManaged;
 	return FailoverMode::None;
 }
 
@@ -162,18 +141,8 @@ std::vector<std::string> Validate(const Destination &destination)
 		errors.emplace_back("destination id is empty");
 	if (destination.name.empty())
 		errors.emplace_back("destination name is empty");
-
-	if (destination.mode == DestinationMode::Direct) {
-		if (destination.service.empty())
-			errors.emplace_back("direct destination service is empty");
-		if (!destination.multitrackConfigurationUrl.empty())
-			errors.emplace_back("direct destination has a multitrack configuration url");
-		if (!destination.managedRouteId.empty())
-			errors.emplace_back("direct destination has a managed route id");
-	} else {
-		if (destination.multitrackConfigurationUrl.empty())
-			errors.emplace_back("managed destination multitrack configuration url is empty");
-	}
+	if (destination.service.empty())
+		errors.emplace_back("destination service is empty");
 
 	return errors;
 }
@@ -199,15 +168,6 @@ std::vector<std::string> Validate(const Route &route)
 		if (!destination.id.empty() && !destinationIds.insert(destination.id).second)
 			errors.emplace_back("duplicate destination id: " + destination.id);
 		AppendErrors(errors, Validate(destination), "destination[" + std::to_string(index) + "]: ");
-	}
-
-	if (route.failoverMode == FailoverMode::ServerManaged) {
-		const bool hasManagedDestination = std::any_of(route.destinations.begin(), route.destinations.end(),
-							 [](const Destination &destination) {
-								 return destination.mode == DestinationMode::ManagedRoute;
-							 });
-		if (!hasManagedDestination)
-			errors.emplace_back("server-managed failover requires a managed destination");
 	}
 
 	return errors;
@@ -246,11 +206,8 @@ void to_json(json &value, const Destination &destination)
 {
 	value = json{{"id", destination.id},
 		     {"name", destination.name},
-		     {"mode", ToString(destination.mode)},
 		     {"service", destination.service},
 		     {"server", destination.server},
-		     {"multitrack_configuration_url", destination.multitrackConfigurationUrl},
-		     {"managed_route_id", destination.managedRouteId},
 		     {"priority", destination.priority},
 		     {"enabled", destination.enabled}};
 }
@@ -259,11 +216,8 @@ void from_json(const json &value, Destination &destination)
 {
 	destination.id = value.value("id", std::string{});
 	destination.name = value.value("name", std::string{});
-	destination.mode = DestinationModeFromString(value.value("mode", std::string{"direct"}));
 	destination.service = value.value("service", std::string{});
 	destination.server = value.value("server", std::string{});
-	destination.multitrackConfigurationUrl = value.value("multitrack_configuration_url", std::string{});
-	destination.managedRouteId = value.value("managed_route_id", std::string{});
 	destination.priority = value.value("priority", 0U);
 	destination.enabled = value.value("enabled", true);
 }
