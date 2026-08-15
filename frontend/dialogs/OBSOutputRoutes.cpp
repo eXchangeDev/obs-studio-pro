@@ -652,14 +652,17 @@ struct OBSOutputRoutesSettings::Impl {
 				AddNativeSettingsRow(form, settings, QTStr("OBSPro.OutputRoutes.Name"), ui->name);
 				ui->output = new QComboBox(settings);
 				PopulateOutputCombo(ui->output, QString::fromUtf8(route.id.c_str()));
-				AddNativeSettingsRow(form, settings, QTStr("OBSPro.Settings.Stream.EncodedOutput"), ui->output);
+				AddNativeSettingsRow(form, settings, QTStr("OBSPro.Settings.Stream.EncodedOutput"),
+						     ui->output);
 				ui->serviceType = new QComboBox(settings);
 				PopulateServiceCombo(ui->serviceType, destination.service);
-				AddNativeSettingsRow(form, settings, QTStr("Basic.Settings.Stream.Service"), ui->serviceType);
+				AddNativeSettingsRow(form, settings, QTStr("Basic.Settings.Stream.Service"),
+						     ui->serviceType);
 				ui->priority = new QSpinBox(settings);
 				ui->priority->setRange(0, 999);
 				ui->priority->setValue(static_cast<int>(destination.priority));
-				AddNativeSettingsRow(form, settings, QTStr("OBSPro.OutputRoutes.Priority"), ui->priority);
+				AddNativeSettingsRow(form, settings, QTStr("OBSPro.OutputRoutes.Priority"),
+						     ui->priority);
 
 				auto *properties =
 					new QGroupBox(QTStr("OBSPro.Settings.Stream.ServiceSettings"), contents);
@@ -868,8 +871,7 @@ struct OBSOutputRoutesSettings::Impl {
 			ui->page->setProperty("outputRouteId", ui->id);
 			QWidget *contents = nullptr;
 			auto *contentsLayout = CreateNativeSettingsPage(ui->page, contents);
-			auto *settings =
-				new QGroupBox(QTStr("Basic.Settings.Output.Adv.Streaming.Settings"), contents);
+			auto *settings = new QGroupBox(QTStr("Basic.Settings.Output.Adv.Streaming.Settings"), contents);
 			auto *form = new QFormLayout(settings);
 			ConfigureNativeSettingsForm(form);
 			contentsLayout->addWidget(settings);
@@ -884,10 +886,12 @@ struct OBSOutputRoutesSettings::Impl {
 			AddNativeSettingsRow(form, settings, QTStr("OBSPro.OutputRoutes.Canvas"), ui->canvas);
 			ui->videoEncoder = new QComboBox(settings);
 			PopulateEncoderCombo(ui->videoEncoder, OBS_ENCODER_VIDEO, route.videoEncoderId);
-			AddNativeSettingsRow(form, settings, QTStr("Basic.Settings.Output.Encoder.Video"), ui->videoEncoder);
+			AddNativeSettingsRow(form, settings, QTStr("Basic.Settings.Output.Encoder.Video"),
+					     ui->videoEncoder);
 			ui->audioEncoder = new QComboBox(settings);
 			PopulateEncoderCombo(ui->audioEncoder, OBS_ENCODER_AUDIO, route.audioEncoderId);
-			AddNativeSettingsRow(form, settings, QTStr("Basic.Settings.Output.Encoder.Audio"), ui->audioEncoder);
+			AddNativeSettingsRow(form, settings, QTStr("Basic.Settings.Output.Encoder.Audio"),
+					     ui->audioEncoder);
 			ui->audioMix = new QSpinBox(settings);
 			ui->audioMix->setRange(1, MAX_AUDIO_MIXES);
 			ui->audioMix->setValue(static_cast<int>(route.audioMix + 1));
@@ -899,7 +903,8 @@ struct OBSOutputRoutesSettings::Impl {
 						  static_cast<int>(FailoverMode::ClientSequential));
 			ui->failoverMode->setCurrentIndex(
 				std::max(0, ui->failoverMode->findData(static_cast<int>(route.failoverMode))));
-			AddNativeSettingsRow(form, settings, QTStr("OBSPro.Settings.Output.DeliveryMode"), ui->failoverMode);
+			AddNativeSettingsRow(form, settings, QTStr("OBSPro.Settings.Output.DeliveryMode"),
+					     ui->failoverMode);
 
 			auto *videoGroup =
 				new QGroupBox(QTStr("OBSPro.Settings.Output.VideoEncoderSettings"), contents);
@@ -1091,9 +1096,10 @@ struct OBSOutputRoutesSettings::Impl {
 				QRegularExpression(QStringLiteral("\\d{2,5}[xX]\\d{2,5}")), general);
 			ui->baseResolution->setValidator(validator);
 			ui->outputResolution->setValidator(validator);
-			AddNativeSettingsRow(form, general, QTStr("Basic.Settings.Video.BaseResolution"), ui->baseResolution);
+			AddNativeSettingsRow(form, general, QTStr("Basic.Settings.Video.BaseResolution"),
+					     ui->baseResolution);
 			AddNativeSettingsRow(form, general, QTStr("Basic.Settings.Video.ScaledResolution"),
-						     ui->outputResolution);
+					     ui->outputResolution);
 			ui->downscaleFilter = new QComboBox(general);
 			ui->downscaleFilter->addItem(QTStr("Basic.Settings.Video.DownscaleFilter.Bilinear"),
 						     static_cast<int>(OBS_SCALE_BILINEAR));
@@ -1111,7 +1117,7 @@ struct OBSOutputRoutesSettings::Impl {
 			}
 			ui->downscaleFilter->setCurrentIndex(scaleIndex);
 			AddNativeSettingsRow(form, general, QTStr("Basic.Settings.Video.DownscaleFilter"),
-						     ui->downscaleFilter);
+					     ui->downscaleFilter);
 			ui->fpsNumerator = new QSpinBox(general);
 			ui->fpsNumerator->setRange(1, 1000000);
 			ui->fpsNumerator->setValue(static_cast<int>(draft.info.fps_num));
@@ -1120,7 +1126,7 @@ struct OBSOutputRoutesSettings::Impl {
 			ui->fpsDenominator->setValue(static_cast<int>(draft.info.fps_den));
 			AddNativeSettingsRow(form, general, QTStr("Basic.Settings.Video.Numerator"), ui->fpsNumerator);
 			AddNativeSettingsRow(form, general, QTStr("Basic.Settings.Video.Denominator"),
-						     ui->fpsDenominator);
+					     ui->fpsDenominator);
 			if (!draft.existing) {
 				auto *mode = new QLabel(CanvasModeText(draft.creationMode), general);
 				mode->setWordWrap(true);
