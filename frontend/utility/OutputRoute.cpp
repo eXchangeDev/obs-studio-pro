@@ -181,10 +181,6 @@ std::vector<std::string> Validate(const Route &route)
 	if (route.audioMix >= MAX_AUDIO_MIXES) {
 		errors.emplace_back("route audio mix is out of range");
 	}
-	if (route.kind == Kind::Stream && route.destinations.empty()) {
-		errors.emplace_back("stream route has no destinations");
-	}
-
 	std::unordered_set<std::string> destinationIds;
 	for (size_t index = 0; index < route.destinations.size(); ++index) {
 		const auto &destination = route.destinations[index];
@@ -206,12 +202,19 @@ std::vector<std::string> Validate(const RouteSet &routes)
 	}
 
 	std::unordered_set<std::string> routeIds;
+	size_t primaryRoutes = 0;
 	for (size_t index = 0; index < routes.routes.size(); ++index) {
 		const auto &route = routes.routes[index];
+		if (route.primary) {
+			++primaryRoutes;
+		}
 		if (!route.id.empty() && !routeIds.insert(route.id).second) {
 			errors.emplace_back("duplicate route id: " + route.id);
 		}
 		AppendErrors(errors, Validate(route), "route[" + std::to_string(index) + "]: ");
+	}
+	if (!routes.routes.empty() && primaryRoutes != 1) {
+		errors.emplace_back("route set must contain exactly one primary route");
 	}
 
 	return errors;
@@ -238,6 +241,7 @@ void to_json(json &value, const Destination &destination)
 		     {"stream_key", destination.streamKey},
 		     {"username", destination.username},
 		     {"password", destination.password},
+		     {"service_settings", destination.serviceSettingsJson},
 		     {"priority", destination.priority},
 		     {"use_authentication", destination.useAuthentication},
 		     {"enabled", destination.enabled}};
@@ -253,6 +257,7 @@ void from_json(const json &value, Destination &destination)
 	destination.streamKey = value.value("stream_key", std::string{});
 	destination.username = value.value("username", std::string{});
 	destination.password = value.value("password", std::string{});
+	destination.serviceSettingsJson = value.value("service_settings", std::string{});
 	destination.priority = value.value("priority", 0U);
 	destination.useAuthentication = value.value("use_authentication", false);
 	destination.enabled = value.value("enabled", true);
@@ -266,10 +271,13 @@ void to_json(json &value, const Route &route)
 		     {"canvas", route.canvas},
 		     {"video_encoder_id", route.videoEncoderId},
 		     {"audio_encoder_id", route.audioEncoderId},
+		     {"video_encoder_settings", route.videoEncoderSettingsJson},
+		     {"audio_encoder_settings", route.audioEncoderSettingsJson},
 		     {"audio_mix", route.audioMix},
 		     {"failover_mode", ToString(route.failoverMode)},
 		     {"destinations", route.destinations},
-		     {"enabled", route.enabled}};
+		     {"enabled", route.enabled},
+		     {"primary", route.primary}};
 }
 
 void from_json(const json &value, Route &route)
@@ -280,10 +288,13 @@ void from_json(const json &value, Route &route)
 	route.canvas = value.value("canvas", CanvasReference{});
 	route.videoEncoderId = value.value("video_encoder_id", std::string{});
 	route.audioEncoderId = value.value("audio_encoder_id", std::string{});
+	route.videoEncoderSettingsJson = value.value("video_encoder_settings", std::string{});
+	route.audioEncoderSettingsJson = value.value("audio_encoder_settings", std::string{});
 	route.audioMix = value.value("audio_mix", 0U);
 	route.failoverMode = FailoverModeFromString(value.value("failover_mode", std::string{"none"}));
 	route.destinations = value.value("destinations", std::vector<Destination>{});
 	route.enabled = value.value("enabled", true);
+	route.primary = value.value("primary", false);
 }
 
 void to_json(json &value, const RouteSet &routes)
@@ -306,6 +317,20 @@ bool Deserialize(std::string_view value, RouteSet &routes, std::string &error)
 {
 	try {
 		routes = json::parse(value).get<RouteSet>();
+		if (routes.schemaVersion == 1) {
+			// Schema v1 grouped destinations by canvas and had no explicit
+			// primary route.  The integrated Settings controller reconciles
+			// the route with the live main-canvas UUID; choosing the first
+			// route here keeps deserialization independent of a running OBS
+			// instance.
+			if (!routes.routes.empty()) {
+				routes.routes.front().primary = true;
+			}
+			routes.schemaVersion = RouteSchemaVersion;
+		} else if (routes.schemaVersion != RouteSchemaVersion) {
+			error = "unsupported route schema version " + std::to_string(routes.schemaVersion);
+			return false;
+		}
 		error.clear();
 		return true;
 	} catch (const json::exception &exception) {

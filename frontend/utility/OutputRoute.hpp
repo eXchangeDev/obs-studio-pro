@@ -28,7 +28,7 @@
 
 namespace OBS::Output {
 
-constexpr uint32_t RouteSchemaVersion = 1;
+constexpr uint32_t RouteSchemaVersion = 2;
 
 enum class Kind {
 	Stream,
@@ -62,6 +62,13 @@ struct Destination {
 	std::string username;
 	std::string password;
 
+	// OBS' native service property view reads and writes the complete service
+	// settings object.  Keeping that JSON intact lets additional destinations
+	// use the same service definitions as the built-in Stream page instead of
+	// maintaining a second, incomplete set of fields.  The legacy fields above
+	// remain for schema-v1 migration and human-readable diagnostics.
+	std::string serviceSettingsJson;
+
 	uint32_t priority = 0;
 	bool useAuthentication = false;
 	bool enabled = true;
@@ -76,6 +83,8 @@ struct Route {
 	// Empty encoder IDs mean "use the current profile/default encoder".
 	std::string videoEncoderId;
 	std::string audioEncoderId;
+	std::string videoEncoderSettingsJson;
+	std::string audioEncoderSettingsJson;
 	uint32_t audioMix = 0;
 
 	// This models failover that OBS itself performs. Any redundancy behind a
@@ -83,6 +92,11 @@ struct Route {
 	FailoverMode failoverMode = FailoverMode::None;
 	std::vector<Destination> destinations;
 	bool enabled = true;
+
+	// The primary route is backed by OBS' existing Streaming tab.  Additional
+	// destinations assigned to it share that encoder.  Every non-primary route
+	// owns its own encoder settings tab.
+	bool primary = false;
 };
 
 struct RouteSet {

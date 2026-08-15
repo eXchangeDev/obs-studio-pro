@@ -112,7 +112,7 @@ void OBSBasic::TriggerQuickTransition(int id)
 	QuickTransition *qt = GetQuickTransition(id);
 
 	if (qt && previewProgramMode) {
-		OBSScene scene = GetCurrentScene();
+		OBSScene scene = GetCurrentSceneSetMainScene();
 		obs_source_t *source = obs_scene_get_source(scene);
 
 		if (GetCurrentTransition() != qt->source) {
@@ -681,6 +681,15 @@ void OBSBasic::SetCurrentScene(obs_scene_t *scene, bool force)
 
 void OBSBasic::SetCurrentScene(OBSSource scene, bool force)
 {
+	if (scene) {
+		OBSCanvasAutoRelease sceneCanvas = obs_source_get_canvas(scene);
+		OBSCanvasAutoRelease mainCanvas = obs_get_main_canvas();
+		if (sceneCanvas && sceneCanvas != mainCanvas) {
+			SetEditorScene(obs_scene_from_source(scene));
+			return;
+		}
+	}
+
 	if (!IsPreviewProgramMode()) {
 		TransitionToScene(scene, force);
 	} else {
@@ -725,13 +734,14 @@ void OBSBasic::SetCurrentScene(OBSSource scene, bool force)
 		bool userSwitched = (!force && !disableSaving);
 		blog(LOG_INFO, "%s to scene '%s'", userSwitched ? "User switched" : "Switched",
 		     obs_source_get_name(scene));
+		ActivateSceneSet(obs_scene_from_source(scene));
 	}
 }
 
 void OBSBasic::TransitionClicked()
 {
 	if (previewProgramMode) {
-		TransitionToScene(GetCurrentScene());
+		TransitionToScene(GetCurrentSceneSetMainScene());
 	}
 }
 

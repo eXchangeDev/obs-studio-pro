@@ -31,6 +31,7 @@
 class Auth;
 class OBSBasic;
 class OBSHotkeyWidget;
+class OBSOutputRoutesSettings;
 class OBSPropertiesView;
 struct FFmpegFormat;
 struct OBSTheme;
@@ -61,6 +62,7 @@ private:
 	bool generalChanged = false;
 	bool stream1Changed = false;
 	bool outputsChanged = false;
+	bool outputRoutesChanged = false;
 	bool audioChanged = false;
 	bool videoChanged = false;
 	bool hotkeysChanged = false;
@@ -90,6 +92,7 @@ private:
 	OBSPropertiesView *streamProperties = nullptr;
 	OBSPropertiesView *streamEncoderProps = nullptr;
 	OBSPropertiesView *recordEncoderProps = nullptr;
+	std::unique_ptr<OBSOutputRoutesSettings> outputRoutesSettings;
 
 	QPointer<QLabel> advOutRecWarning;
 	QPointer<QLabel> simpleOutRecWarning;
@@ -143,8 +146,8 @@ private:
 
 	inline bool Changed() const
 	{
-		return generalChanged || appearanceChanged || outputsChanged || stream1Changed || audioChanged ||
-		       videoChanged || advancedChanged || hotkeysChanged || a11yChanged;
+		return generalChanged || appearanceChanged || outputsChanged || outputRoutesChanged || stream1Changed ||
+		       audioChanged || videoChanged || advancedChanged || hotkeysChanged || a11yChanged;
 	}
 
 	inline void EnableApplyButton(bool en) { ui->buttonBox->button(QDialogButtonBox::Apply)->setEnabled(en); }
@@ -154,6 +157,7 @@ private:
 		generalChanged = false;
 		stream1Changed = false;
 		outputsChanged = false;
+		outputRoutesChanged = false;
 		audioChanged = false;
 		videoChanged = false;
 		hotkeysChanged = false;
@@ -295,7 +299,7 @@ private:
 	void SaveA11ySettings();
 	void SaveAppearanceSettings();
 	void SaveAdvancedSettings();
-	void SaveSettings();
+	bool SaveSettings();
 
 	void SearchHotkeys(const QString &text, obs_key_combination_t filterCombo);
 
@@ -401,6 +405,7 @@ private slots:
 	void LowLatencyBufferingChanged(bool checked);
 	void UpdateAudioWarnings();
 	void OutputsChanged();
+	void OutputRoutesChanged();
 	void Stream1Changed();
 	void VideoChanged();
 	void VideoChangedResolution();

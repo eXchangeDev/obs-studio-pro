@@ -43,6 +43,18 @@ std::string ContextName(const char *kind, const Route &route, const Destination 
 	return name;
 }
 
+void ApplyJsonSettings(obs_data_t *settings, const std::string &serialized)
+{
+	if (!settings || serialized.empty()) {
+		return;
+	}
+
+	OBSDataAutoRelease overrides = obs_data_create_from_json(serialized.c_str());
+	if (overrides) {
+		obs_data_apply(settings, overrides);
+	}
+}
+
 OBSEncoderAutoRelease CreateVideoEncoder(const Route &route, obs_canvas_t *canvas, obs_encoder_t *reference,
 					 std::string &error)
 {
@@ -66,12 +78,13 @@ OBSEncoderAutoRelease CreateVideoEncoder(const Route &route, obs_canvas_t *canva
 
 	const bool sameEncoder = referenceId && strcmp(referenceId, encoderId) == 0;
 	const bool sameVideo = obs_encoder_video(reference) == video || obs_encoder_parent_video(reference) == video;
-	if (sameEncoder && sameVideo) {
+	if (route.primary && sameEncoder && sameVideo && route.videoEncoderSettingsJson.empty()) {
 		return obs_encoder_get_ref(reference);
 	}
 
 	OBSDataAutoRelease settings = sameEncoder ? obs_encoder_get_settings(reference)
 						  : obs_encoder_defaults(encoderId);
+	ApplyJsonSettings(settings, route.videoEncoderSettingsJson);
 	const std::string name = ContextName("video", route);
 	OBSEncoderAutoRelease encoder = obs_video_encoder_create(encoderId, name.c_str(), settings, nullptr);
 	if (!encoder) {
@@ -98,12 +111,14 @@ OBSEncoderAutoRelease CreateAudioEncoder(const Route &route, obs_encoder_t *refe
 	}
 
 	const bool sameEncoder = referenceId && strcmp(referenceId, encoderId) == 0;
-	if (sameEncoder && obs_encoder_get_mixer_index(reference) == route.audioMix) {
+	if (route.primary && sameEncoder && obs_encoder_get_mixer_index(reference) == route.audioMix &&
+	    route.audioEncoderSettingsJson.empty()) {
 		return obs_encoder_get_ref(reference);
 	}
 
 	OBSDataAutoRelease settings = sameEncoder ? obs_encoder_get_settings(reference)
 						  : obs_encoder_defaults(encoderId);
+	ApplyJsonSettings(settings, route.audioEncoderSettingsJson);
 	const std::string name = ContextName("audio", route);
 	OBSEncoderAutoRelease encoder =
 		obs_audio_encoder_create(encoderId, name.c_str(), settings, route.audioMix, nullptr);
@@ -119,15 +134,20 @@ OBSEncoderAutoRelease CreateAudioEncoder(const Route &route, obs_encoder_t *refe
 OBSDataAutoRelease CreateServiceSettings(const Destination &destination)
 {
 	OBSDataAutoRelease settings = obs_data_create();
+	ApplyJsonSettings(settings, destination.serviceSettingsJson);
 	if (!destination.serviceName.empty()) {
-		obs_data_set_string(settings, "service", destination.serviceName.c_str());
+		obs_data_set_default_string(settings, "service", destination.serviceName.c_str());
 	}
-	obs_data_set_string(settings, "server", destination.server.c_str());
-	obs_data_set_string(settings, "key", destination.streamKey.c_str());
-	obs_data_set_bool(settings, "use_auth", destination.useAuthentication);
+	if (!destination.server.empty()) {
+		obs_data_set_default_string(settings, "server", destination.server.c_str());
+	}
+	if (!destination.streamKey.empty()) {
+		obs_data_set_default_string(settings, "key", destination.streamKey.c_str());
+	}
+	obs_data_set_default_bool(settings, "use_auth", destination.useAuthentication);
 	if (destination.useAuthentication) {
-		obs_data_set_string(settings, "username", destination.username.c_str());
-		obs_data_set_string(settings, "password", destination.password.c_str());
+		obs_data_set_default_string(settings, "username", destination.username.c_str());
+		obs_data_set_default_string(settings, "password", destination.password.c_str());
 	}
 	return settings;
 }

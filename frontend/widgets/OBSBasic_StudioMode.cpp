@@ -198,7 +198,7 @@ void OBSBasic::SetPreviewProgramMode(bool enabled)
 		CreateProgramDisplay();
 		CreateProgramOptions();
 
-		OBSScene curScene = GetCurrentScene();
+		OBSScene curScene = GetCurrentSceneSetMainScene();
 
 		OBSSceneAutoRelease dup;
 		if (sceneDuplicationMode) {

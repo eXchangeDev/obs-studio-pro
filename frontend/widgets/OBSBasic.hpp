@@ -62,6 +62,7 @@ class VolumeControl;
 class YouTubeAppDock;
 #endif
 class QMessageBox;
+class QTabBar;
 class QWidgetAction;
 struct QuickTransition;
 
@@ -1143,14 +1144,28 @@ public:
 	 */
 private:
 	std::vector<OBS::Canvas> canvases;
+	QPointer<QTabBar> canvasTabs;
+	std::string activeCanvasUuid;
+	std::vector<std::shared_ptr<OBSSignal>> activeCanvasSceneSignals;
 
 	static void CanvasRemoved(void *data, calldata_t *params);
 	void ClearCanvases();
+	OBSScene FindSceneSetVariant(obs_canvas_t *canvas, const char *sceneSetId) const;
+	OBSScene GetCurrentSceneSetMainScene() const;
+	void SetEditorScene(OBSScene scene);
+	void ActivateSceneSet(OBSScene mainScene);
+	void RemoveSceneSetVariants(OBSScene mainScene);
+	void RenameSceneSetVariants(OBSScene mainScene, const char *name);
 
 public:
 	const std::vector<OBS::Canvas> &GetCanvases() const noexcept { return canvases; }
 
 	const OBS::Canvas &AddCanvas(const std::string &name, obs_video_info *ovi = nullptr, int flags = 0);
+	void InitializeCanvasTabs();
+	void RefreshCanvasTabs();
+	void InitializeCanvasSceneSets(obs_canvas_t *canvas, bool duplicateLayout, bool independentSources);
+	bool GetActiveCanvasVideoInfo(obs_video_info *ovi) const;
+	OBSCanvasAutoRelease GetActiveCanvas() const;
 
 public slots:
 	bool RemoveCanvas(OBSCanvas canvas);

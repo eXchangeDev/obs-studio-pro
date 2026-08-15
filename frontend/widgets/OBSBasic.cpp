@@ -37,7 +37,6 @@
 #include <dialogs/OBSBasicInteraction.hpp>
 #include <dialogs/OBSBasicProperties.hpp>
 #include <dialogs/OBSBasicTransform.hpp>
-#include <dialogs/OBSOutputRoutes.hpp>
 #include <models/SceneCollection.hpp>
 #include <settings/OBSBasicSettings.hpp>
 #include <utility/QuickTransition.hpp>
@@ -255,6 +254,7 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	api = InitializeAPIInterface(this);
 
 	ui->setupUi(this);
+	InitializeCanvasTabs();
 	ui->previewDisabledWidget->setVisible(false);
 
 	/* Set up streaming connections */
@@ -403,7 +403,7 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	auto displayResize = [this]() {
 		struct obs_video_info ovi;
 
-		if (obs_get_video_info(&ovi)) {
+		if (GetActiveCanvasVideoInfo(&ovi)) {
 			ResizePreview(ovi.base_width, ovi.base_height);
 		}
 
@@ -591,12 +591,6 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	QActionGroup *actionGroup = new QActionGroup(this);
 	actionGroup->addAction(ui->actionSceneListMode);
 	actionGroup->addAction(ui->actionSceneGridMode);
-
-	QAction *outputRoutesAction = ui->menuTools->addAction(QTStr("OBSPro.OutputRoutes.Menu"));
-	connect(outputRoutesAction, &QAction::triggered, this, [this]() {
-		OBSOutputRoutesDialog dialog(this);
-		dialog.exec();
-	});
 
 	UpdatePreviewSafeAreas();
 	UpdatePreviewSpacingHelpers();
@@ -1153,6 +1147,10 @@ void OBSBasic::OBSInit()
 	}
 
 	loaded = true;
+	for (const OBS::Canvas &canvas : canvases) {
+		InitializeCanvasSceneSets(canvas, false, false);
+	}
+	RefreshCanvasTabs();
 
 	previewEnabled = config_get_bool(App()->GetUserConfig(), "BasicWindow", "PreviewEnabled");
 
@@ -1169,7 +1167,7 @@ void OBSBasic::OBSInit()
 		obs_display_add_draw_callback(window->GetDisplay(), OBSBasic::RenderMain, this);
 
 		struct obs_video_info ovi;
-		if (obs_get_video_info(&ovi)) {
+		if (GetActiveCanvasVideoInfo(&ovi)) {
 			ResizePreview(ovi.base_width, ovi.base_height);
 		}
 	};

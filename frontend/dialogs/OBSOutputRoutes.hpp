@@ -17,37 +17,32 @@
 
 #pragma once
 
-#include <utility/OutputRoute.hpp>
+#include <functional>
+#include <memory>
 
-#include <QDialog>
+#include <QString>
 
 class OBSBasic;
-class QPushButton;
-class QTableWidget;
+class QWidget;
 
-class OBSOutputRoutesDialog : public QDialog {
+// Integrates multi-destination streaming, encoded outputs, and canvases into
+// OBS' existing Settings pages.  The class deliberately has no Q_OBJECT macro:
+// all signal connections terminate in lambdas and the generated settings form
+// remains the single owner of the native controls.
+class OBSOutputRoutesSettings {
 public:
-	explicit OBSOutputRoutesDialog(OBSBasic *main);
+	OBSOutputRoutesSettings(OBSBasic *main, QWidget *streamPage, QWidget *outputPage, QWidget *videoPage,
+				std::function<void()> changedCallback);
+	~OBSOutputRoutesSettings();
+
+	OBSOutputRoutesSettings(const OBSOutputRoutesSettings &) = delete;
+	OBSOutputRoutesSettings &operator=(const OBSOutputRoutesSettings &) = delete;
+
+	void Load();
+	bool Validate(QString &error);
+	bool Save(QString &error);
 
 private:
-	OBSBasic *main;
-	OBS::Output::RouteSet routes;
-	QTableWidget *destinationTable = nullptr;
-	QTableWidget *canvasTable = nullptr;
-	QPushButton *editDestinationButton = nullptr;
-	QPushButton *removeDestinationButton = nullptr;
-	QPushButton *editCanvasButton = nullptr;
-	QPushButton *removeCanvasButton = nullptr;
-
-	void LoadRoutes();
-	bool SaveRoutes();
-	void RefreshDestinations();
-	void RefreshCanvases();
-
-	void AddDestination();
-	void EditDestination();
-	void RemoveDestination();
-	void AddCanvas();
-	void EditCanvas();
-	void RemoveCanvas();
+	struct Impl;
+	std::unique_ptr<Impl> impl;
 };
