@@ -661,6 +661,9 @@ std::shared_future<void> AdvancedOutput::SetupStreaming(obs_service_t *service,
 					       multiTrackAudioMixes](std::optional<bool> multitrackVideoResult) {
 		if (multitrackVideoResult.has_value()) {
 			outputRoutes.Clear();
+			if (multitrackVideoResult.value()) {
+				PrepareOutputRoutes(multitrackVideo->StreamingOutput());
+			}
 			return multitrackVideoResult.value();
 		}
 
@@ -774,6 +777,7 @@ bool AdvancedOutput::StartStreaming(obs_service_t *service)
 		}
 		if (multitrackVideo && multitrackVideoActive) {
 			multitrackVideo->StartedStreaming();
+			StartOutputRoutes();
 		}
 		return true;
 	}

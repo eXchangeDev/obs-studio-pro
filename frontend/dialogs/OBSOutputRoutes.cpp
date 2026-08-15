@@ -31,6 +31,8 @@
 #include <QFormLayout>
 #include <QFrame>
 #include <QGroupBox>
+#include <QGuiApplication>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QLayout>
@@ -41,7 +43,10 @@
 #include <QRegularExpressionValidator>
 #include <QScrollArea>
 #include <QSignalBlocker>
+#include <QSizePolicy>
+#include <QScreen>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QStringList>
 #include <QTabWidget>
 #include <QToolButton>
@@ -49,6 +54,8 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cmath>
+#include <numeric>
 #include <set>
 #include <unordered_set>
 #include <utility>
@@ -99,6 +106,138 @@ bool ParseResolution(const QString &text, uint32_t &width, uint32_t &height)
 	return true;
 }
 
+QString AspectRatioText(const QString &resolution)
+{
+	uint32_t width = 0;
+	uint32_t height = 0;
+	if (!ParseResolution(resolution, width, height)) {
+		return {};
+	}
+
+	const uint32_t divisor = std::gcd(width, height);
+	return QTStr("AspectRatio").arg(QString::number(width / divisor), QString::number(height / divisor));
+}
+
+void AddResolutionItem(QComboBox *combo, uint32_t width, uint32_t height)
+{
+	const QString resolution = ResolutionText(width, height);
+	if (combo->findText(resolution) < 0) {
+		combo->addItem(resolution);
+	}
+}
+
+uint32_t ScaledResolution(uint32_t value, double scale, uint32_t alignment)
+{
+	const auto scaled = static_cast<uint32_t>(std::round(static_cast<double>(value) * scale));
+	return std::max(32U, scaled & alignment);
+}
+
+void PopulateCanvasResolutionCombo(QComboBox *combo, const obs_video_info &info, bool baseResolution)
+{
+	combo->setEditable(true);
+	combo->setDuplicatesEnabled(false);
+	combo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+	combo->clear();
+
+	if (baseResolution) {
+		for (QScreen *screen : QGuiApplication::screens()) {
+			const QSize size = screen->size();
+			const auto width = static_cast<uint32_t>(std::round(size.width() * screen->devicePixelRatio()));
+			const auto height =
+				static_cast<uint32_t>(std::round(size.height() * screen->devicePixelRatio()));
+			AddResolutionItem(combo, width, height);
+		}
+		AddResolutionItem(combo, 1920, 1080);
+		AddResolutionItem(combo, 1280, 720);
+	} else {
+		static constexpr double scales[] = {1.0,       1.0 / 1.25, 1.0 / 0.75, 1.0 / 1.5,
+						    1.0 / 0.6, 1.0 / 1.75, 1.0 / 2.0,  1.0 / 2.25,
+						    1.0 / 2.5, 1.0 / 2.75, 1.0 / 3.0};
+		for (const double scale : scales) {
+			AddResolutionItem(combo, ScaledResolution(info.base_width, scale, ~1U),
+					  ScaledResolution(info.base_height, scale, ~1U));
+		}
+	}
+
+	combo->setCurrentText(ResolutionText(baseResolution ? info.base_width : info.output_width,
+					     baseResolution ? info.base_height : info.output_height));
+}
+
+void UpdateAspectRatio(QComboBox *combo, QLabel *aspect)
+{
+	aspect->setText(AspectRatioText(combo->currentText()));
+}
+
+bool ParseCommonFps(const QString &text, uint32_t &numerator, uint32_t &denominator)
+{
+	if (text == QStringLiteral("24 NTSC")) {
+		numerator = 24000;
+		denominator = 1001;
+		return true;
+	}
+	if (text == QStringLiteral("25 PAL")) {
+		numerator = 25;
+		denominator = 1;
+		return true;
+	}
+	if (text == QStringLiteral("29.97")) {
+		numerator = 30000;
+		denominator = 1001;
+		return true;
+	}
+	if (text == QStringLiteral("59.94")) {
+		numerator = 60000;
+		denominator = 1001;
+		return true;
+	}
+	if (text == QStringLiteral("50 PAL")) {
+		numerator = 50;
+		denominator = 1;
+		return true;
+	}
+
+	bool ok = false;
+	const double value = text.toDouble(&ok);
+	if (!ok || value <= 0.0) {
+		return false;
+	}
+	numerator = static_cast<uint32_t>(std::round(value));
+	denominator = 1;
+	return numerator > 0;
+}
+
+void PopulateCanvasDownscaleFilter(QComboBox *combo, const obs_video_info &info, const QString &baseResolution,
+				   const QString &outputResolution)
+{
+	QSignalBlocker blocker(combo);
+	combo->clear();
+
+	uint32_t baseWidth = 0;
+	uint32_t baseHeight = 0;
+	uint32_t outputWidth = 0;
+	uint32_t outputHeight = 0;
+	const bool validResolutions = ParseResolution(baseResolution, baseWidth, baseHeight) &&
+				      ParseResolution(outputResolution, outputWidth, outputHeight);
+	if (validResolutions && baseWidth == outputWidth && baseHeight == outputHeight) {
+		combo->addItem(QTStr("Basic.Settings.Video.DownscaleFilter.Unavailable"),
+			       static_cast<int>(info.scale_type));
+		combo->setEnabled(false);
+		return;
+	}
+
+	combo->setEnabled(true);
+	combo->addItem(QTStr("Basic.Settings.Video.DownscaleFilter.Bilinear"), static_cast<int>(OBS_SCALE_BILINEAR));
+	combo->addItem(QTStr("Basic.Settings.Video.DownscaleFilter.Area"), static_cast<int>(OBS_SCALE_AREA));
+	combo->addItem(QTStr("Basic.Settings.Video.DownscaleFilter.Bicubic"), static_cast<int>(OBS_SCALE_BICUBIC));
+	combo->addItem(QTStr("Basic.Settings.Video.DownscaleFilter.Lanczos"), static_cast<int>(OBS_SCALE_LANCZOS));
+
+	int scaleIndex = combo->findData(static_cast<int>(info.scale_type));
+	if (scaleIndex < 0) {
+		scaleIndex = combo->findData(static_cast<int>(OBS_SCALE_BICUBIC));
+	}
+	combo->setCurrentIndex(scaleIndex);
+}
+
 OBSDataAutoRelease SettingsFromJson(const std::string &serialized, obs_data_t *defaults)
 {
 	OBSDataAutoRelease settings = obs_data_newref(defaults);
@@ -142,11 +281,16 @@ void AddNativeSettingsRow(QFormLayout *form, QWidget *parent, const QString &tex
 	form->addRow(CreateNativeSettingsLabel(parent, text, field), field);
 }
 
-QVBoxLayout *CreateNativeSettingsPage(QWidget *page, QWidget *&contents)
+QVBoxLayout *CreateNativeSettingsPage(QWidget *page, QWidget *&contents, bool scrollable = true)
 {
 	auto *pageLayout = new QVBoxLayout(page);
-	pageLayout->setContentsMargins(0, 0, 0, 0);
-	pageLayout->setSpacing(0);
+	pageLayout->setContentsMargins(9, 0, 0, 0);
+	pageLayout->setSpacing(6);
+
+	if (!scrollable) {
+		contents = page;
+		return pageLayout;
+	}
 
 	auto *scroll = new QScrollArea(page);
 	scroll->setFrameShape(QFrame::NoFrame);
@@ -154,11 +298,27 @@ QVBoxLayout *CreateNativeSettingsPage(QWidget *page, QWidget *&contents)
 
 	contents = new QWidget(scroll);
 	auto *contentsLayout = new QVBoxLayout(contents);
-	contentsLayout->setContentsMargins(9, 0, 0, 0);
+	contentsLayout->setContentsMargins(0, 0, 0, 0);
 	contentsLayout->setSpacing(6);
 	scroll->setWidget(contents);
 	pageLayout->addWidget(scroll);
 	return contentsLayout;
+}
+
+void ReparentLayoutWidgets(QLayout *layout, QWidget *parent)
+{
+	if (!layout) {
+		return;
+	}
+
+	for (int index = 0; index < layout->count(); ++index) {
+		QLayoutItem *item = layout->itemAt(index);
+		if (QWidget *widget = item->widget()) {
+			widget->setParent(parent);
+		} else if (QLayout *childLayout = item->layout()) {
+			ReparentLayoutWidgets(childLayout, parent);
+		}
+	}
 }
 
 QWidget *MovePageContentsToTab(QWidget *page, const QString &title, QTabWidget *&tabs)
@@ -179,6 +339,7 @@ QWidget *MovePageContentsToTab(QWidget *page, const QString &title, QTabWidget *
 			nativeLayout->addWidget(widget);
 			delete item;
 		} else if (QLayout *layout = item->layout()) {
+			ReparentLayoutWidgets(layout, nativePage);
 			nativeLayout->addLayout(layout);
 			delete item;
 		} else {
@@ -262,9 +423,15 @@ struct OBSOutputRoutesSettings::Impl {
 		QString id;
 		QWidget *page = nullptr;
 		QLineEdit *name = nullptr;
-		QLineEdit *baseResolution = nullptr;
-		QLineEdit *outputResolution = nullptr;
+		QComboBox *baseResolution = nullptr;
+		QLabel *baseAspect = nullptr;
+		QComboBox *outputResolution = nullptr;
+		QLabel *outputAspect = nullptr;
 		QComboBox *downscaleFilter = nullptr;
+		QComboBox *fpsType = nullptr;
+		QStackedWidget *fpsTypes = nullptr;
+		QComboBox *fpsCommon = nullptr;
+		QSpinBox *fpsInteger = nullptr;
 		QSpinBox *fpsNumerator = nullptr;
 		QSpinBox *fpsDenominator = nullptr;
 	};
@@ -1035,16 +1202,27 @@ struct OBSOutputRoutesSettings::Impl {
 		draft->name = ui.name->text().trimmed();
 		uint32_t width = 0;
 		uint32_t height = 0;
-		if (ParseResolution(ui.baseResolution->text(), width, height)) {
+		if (ParseResolution(ui.baseResolution->currentText(), width, height)) {
 			draft->info.base_width = width;
 			draft->info.base_height = height;
 		}
-		if (ParseResolution(ui.outputResolution->text(), width, height)) {
+		if (ParseResolution(ui.outputResolution->currentText(), width, height)) {
 			draft->info.output_width = width;
 			draft->info.output_height = height;
 		}
-		draft->info.fps_num = static_cast<uint32_t>(ui.fpsNumerator->value());
-		draft->info.fps_den = static_cast<uint32_t>(ui.fpsDenominator->value());
+		switch (ui.fpsType->currentIndex()) {
+		case 0:
+			ParseCommonFps(ui.fpsCommon->currentText(), draft->info.fps_num, draft->info.fps_den);
+			break;
+		case 1:
+			draft->info.fps_num = static_cast<uint32_t>(ui.fpsInteger->value());
+			draft->info.fps_den = 1;
+			break;
+		default:
+			draft->info.fps_num = static_cast<uint32_t>(ui.fpsNumerator->value());
+			draft->info.fps_den = static_cast<uint32_t>(ui.fpsDenominator->value());
+			break;
+		}
 		draft->info.scale_type = static_cast<obs_scale_type>(ui.downscaleFilter->currentData().toInt());
 	}
 
@@ -1081,52 +1259,116 @@ struct OBSOutputRoutesSettings::Impl {
 			ui->page = new QWidget(canvasTabs);
 			ui->page->setProperty("canvasDraftId", draft.id);
 			QWidget *contents = nullptr;
-			auto *layout = CreateNativeSettingsPage(ui->page, contents);
+			auto *layout = CreateNativeSettingsPage(ui->page, contents, false);
 			auto *general = new QGroupBox(QTStr("Basic.Settings.General"), contents);
+			general->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
 			auto *form = new QFormLayout(general);
 			ConfigureNativeSettingsForm(form);
 			layout->addWidget(general);
 			ui->name = new QLineEdit(draft.name, general);
 			AddNativeSettingsRow(form, general, QTStr("OBSPro.OutputRoutes.Name"), ui->name);
-			ui->baseResolution =
-				new QLineEdit(ResolutionText(draft.info.base_width, draft.info.base_height), general);
-			ui->outputResolution = new QLineEdit(
-				ResolutionText(draft.info.output_width, draft.info.output_height), general);
+
+			auto *baseResolutionLayout = new QHBoxLayout;
+			baseResolutionLayout->setContentsMargins(0, 0, 0, 0);
+			baseResolutionLayout->setSpacing(6);
+			ui->baseResolution = new QComboBox(general);
+			ui->baseAspect = new QLabel(general);
+			baseResolutionLayout->addWidget(ui->baseResolution);
+			baseResolutionLayout->addWidget(ui->baseAspect);
+			PopulateCanvasResolutionCombo(ui->baseResolution, draft.info, true);
+			UpdateAspectRatio(ui->baseResolution, ui->baseAspect);
+
+			auto *outputResolutionLayout = new QHBoxLayout;
+			outputResolutionLayout->setContentsMargins(0, 0, 0, 0);
+			outputResolutionLayout->setSpacing(6);
+			ui->outputResolution = new QComboBox(general);
+			ui->outputAspect = new QLabel(general);
+			outputResolutionLayout->addWidget(ui->outputResolution);
+			outputResolutionLayout->addWidget(ui->outputAspect);
+			PopulateCanvasResolutionCombo(ui->outputResolution, draft.info, false);
+			UpdateAspectRatio(ui->outputResolution, ui->outputAspect);
+
 			auto *validator = new QRegularExpressionValidator(
 				QRegularExpression(QStringLiteral("\\d{2,5}[xX]\\d{2,5}")), general);
-			ui->baseResolution->setValidator(validator);
-			ui->outputResolution->setValidator(validator);
-			AddNativeSettingsRow(form, general, QTStr("Basic.Settings.Video.BaseResolution"),
-					     ui->baseResolution);
-			AddNativeSettingsRow(form, general, QTStr("Basic.Settings.Video.ScaledResolution"),
-					     ui->outputResolution);
+			ui->baseResolution->lineEdit()->setValidator(validator);
+			ui->outputResolution->lineEdit()->setValidator(validator);
+			form->addRow(CreateNativeSettingsLabel(general, QTStr("Basic.Settings.Video.BaseResolution"),
+							       ui->baseResolution),
+				     baseResolutionLayout);
+			form->addRow(CreateNativeSettingsLabel(general, QTStr("Basic.Settings.Video.ScaledResolution"),
+							       ui->outputResolution),
+				     outputResolutionLayout);
 			ui->downscaleFilter = new QComboBox(general);
-			ui->downscaleFilter->addItem(QTStr("Basic.Settings.Video.DownscaleFilter.Bilinear"),
-						     static_cast<int>(OBS_SCALE_BILINEAR));
-			ui->downscaleFilter->addItem(QTStr("Basic.Settings.Video.DownscaleFilter.Area"),
-						     static_cast<int>(OBS_SCALE_AREA));
-			ui->downscaleFilter->addItem(QTStr("Basic.Settings.Video.DownscaleFilter.Bicubic"),
-						     static_cast<int>(OBS_SCALE_BICUBIC));
-			ui->downscaleFilter->addItem(QTStr("Basic.Settings.Video.DownscaleFilter.Lanczos"),
-						     static_cast<int>(OBS_SCALE_LANCZOS));
-			int scaleIndex = ui->downscaleFilter->findData(static_cast<int>(draft.info.scale_type));
-			if (scaleIndex < 0) {
-				ui->downscaleFilter->addItem(QTStr("Basic.Settings.Video.DownscaleFilter.Unavailable"),
-							     static_cast<int>(draft.info.scale_type));
-				scaleIndex = ui->downscaleFilter->count() - 1;
-			}
-			ui->downscaleFilter->setCurrentIndex(scaleIndex);
+			PopulateCanvasDownscaleFilter(ui->downscaleFilter, draft.info,
+						      ui->baseResolution->currentText(),
+						      ui->outputResolution->currentText());
 			AddNativeSettingsRow(form, general, QTStr("Basic.Settings.Video.DownscaleFilter"),
 					     ui->downscaleFilter);
-			ui->fpsNumerator = new QSpinBox(general);
+
+			ui->fpsType = new QComboBox(general);
+			ui->fpsType->addItem(QTStr("Basic.Settings.Video.FPSCommon"));
+			ui->fpsType->addItem(QTStr("Basic.Settings.Video.FPSInteger"));
+			ui->fpsType->addItem(QTStr("Basic.Settings.Video.FPSFraction"));
+			ui->fpsTypes = new QStackedWidget(general);
+			ui->fpsTypes->setFrameShape(QFrame::NoFrame);
+			ui->fpsTypes->setLineWidth(0);
+
+			auto *commonPage = new QWidget(ui->fpsTypes);
+			auto *commonLayout = new QHBoxLayout(commonPage);
+			commonLayout->setContentsMargins(0, 0, 0, 0);
+			ui->fpsCommon = new QComboBox(commonPage);
+			for (const QString &value :
+			     {QStringLiteral("10"), QStringLiteral("20"), QStringLiteral("24 NTSC"),
+			      QStringLiteral("25 PAL"), QStringLiteral("29.97"), QStringLiteral("30"),
+			      QStringLiteral("48"), QStringLiteral("50 PAL"), QStringLiteral("59.94"),
+			      QStringLiteral("60")}) {
+				ui->fpsCommon->addItem(value);
+			}
+			commonLayout->addWidget(ui->fpsCommon, 0, Qt::AlignTop);
+			ui->fpsTypes->addWidget(commonPage);
+
+			auto *integerPage = new QWidget(ui->fpsTypes);
+			auto *integerLayout = new QHBoxLayout(integerPage);
+			integerLayout->setContentsMargins(0, 0, 0, 0);
+			ui->fpsInteger = new QSpinBox(integerPage);
+			ui->fpsInteger->setRange(1, 120);
+			integerLayout->addWidget(ui->fpsInteger, 0, Qt::AlignTop);
+			ui->fpsTypes->addWidget(integerPage);
+
+			auto *fractionPage = new QWidget(ui->fpsTypes);
+			auto *fractionLayout = new QFormLayout(fractionPage);
+			fractionLayout->setContentsMargins(0, 0, 0, 0);
+			ui->fpsNumerator = new QSpinBox(fractionPage);
 			ui->fpsNumerator->setRange(1, 1000000);
-			ui->fpsNumerator->setValue(static_cast<int>(draft.info.fps_num));
-			ui->fpsDenominator = new QSpinBox(general);
+			ui->fpsDenominator = new QSpinBox(fractionPage);
 			ui->fpsDenominator->setRange(1, 1000000);
-			ui->fpsDenominator->setValue(static_cast<int>(draft.info.fps_den));
-			AddNativeSettingsRow(form, general, QTStr("Basic.Settings.Video.Numerator"), ui->fpsNumerator);
-			AddNativeSettingsRow(form, general, QTStr("Basic.Settings.Video.Denominator"),
-					     ui->fpsDenominator);
+			fractionLayout->addRow(QTStr("Basic.Settings.Video.Numerator"), ui->fpsNumerator);
+			fractionLayout->addRow(QTStr("Basic.Settings.Video.Denominator"), ui->fpsDenominator);
+			ui->fpsTypes->addWidget(fractionPage);
+
+			int commonFpsIndex = -1;
+			for (int index = 0; index < ui->fpsCommon->count(); ++index) {
+				uint32_t numerator = 0;
+				uint32_t denominator = 0;
+				if (ParseCommonFps(ui->fpsCommon->itemText(index), numerator, denominator) &&
+				    numerator == draft.info.fps_num && denominator == draft.info.fps_den) {
+					commonFpsIndex = index;
+					break;
+				}
+			}
+			if (commonFpsIndex >= 0) {
+				ui->fpsType->setCurrentIndex(0);
+				ui->fpsCommon->setCurrentIndex(commonFpsIndex);
+			} else if (draft.info.fps_den == 1) {
+				ui->fpsType->setCurrentIndex(1);
+				ui->fpsInteger->setValue(static_cast<int>(draft.info.fps_num));
+			} else {
+				ui->fpsType->setCurrentIndex(2);
+				ui->fpsNumerator->setValue(static_cast<int>(draft.info.fps_num));
+				ui->fpsDenominator->setValue(static_cast<int>(draft.info.fps_den));
+			}
+			ui->fpsTypes->setCurrentIndex(ui->fpsType->currentIndex());
+			form->addRow(ui->fpsType, ui->fpsTypes);
 			if (!draft.existing) {
 				auto *mode = new QLabel(CanvasModeText(draft.creationMode), general);
 				mode->setWordWrap(true);
@@ -1148,10 +1390,37 @@ struct OBSOutputRoutesSettings::Impl {
 				RefreshRouteCanvasCombos();
 				MarkChanged();
 			});
-			for (QLineEdit *edit : {ui->baseResolution, ui->outputResolution}) {
-				QObject::connect(edit, &QLineEdit::textChanged, ui->page,
-						 [this](const QString &) { MarkChanged(); });
-			}
+			QObject::connect(ui->baseResolution, &QComboBox::currentTextChanged, ui->page,
+					 [this, raw](const QString &) {
+						 UpdateAspectRatio(raw->baseResolution, raw->baseAspect);
+						 if (CanvasDraft *draft = FindCanvasDraft(raw->id)) {
+							 PopulateCanvasDownscaleFilter(
+								 raw->downscaleFilter, draft->info,
+								 raw->baseResolution->currentText(),
+								 raw->outputResolution->currentText());
+						 }
+						 MarkChanged();
+					 });
+			QObject::connect(ui->outputResolution, &QComboBox::currentTextChanged, ui->page,
+					 [this, raw](const QString &) {
+						 UpdateAspectRatio(raw->outputResolution, raw->outputAspect);
+						 if (CanvasDraft *draft = FindCanvasDraft(raw->id)) {
+							 PopulateCanvasDownscaleFilter(
+								 raw->downscaleFilter, draft->info,
+								 raw->baseResolution->currentText(),
+								 raw->outputResolution->currentText());
+						 }
+						 MarkChanged();
+					 });
+			QObject::connect(ui->fpsType, &QComboBox::currentIndexChanged, ui->page,
+					 [this, raw](int index) {
+						 raw->fpsTypes->setCurrentIndex(index);
+						 MarkChanged();
+					 });
+			QObject::connect(ui->fpsCommon, &QComboBox::currentTextChanged, ui->page,
+					 [this](const QString &) { MarkChanged(); });
+			QObject::connect(ui->fpsInteger, &QSpinBox::valueChanged, ui->page,
+					 [this](int) { MarkChanged(); });
 			QObject::connect(ui->fpsNumerator, &QSpinBox::valueChanged, ui->page,
 					 [this](int) { MarkChanged(); });
 			QObject::connect(ui->fpsDenominator, &QSpinBox::valueChanged, ui->page,
@@ -1267,8 +1536,8 @@ struct OBSOutputRoutesSettings::Impl {
 		for (const auto &ui : canvasUis) {
 			uint32_t width = 0;
 			uint32_t height = 0;
-			if (!ParseResolution(ui->baseResolution->text(), width, height) ||
-			    !ParseResolution(ui->outputResolution->text(), width, height)) {
+			if (!ParseResolution(ui->baseResolution->currentText(), width, height) ||
+			    !ParseResolution(ui->outputResolution->currentText(), width, height)) {
 				error = QTStr("OBSPro.Settings.Canvas.InvalidVideo").arg(ui->name->text().trimmed());
 				return false;
 			}
