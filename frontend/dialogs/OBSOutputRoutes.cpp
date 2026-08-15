@@ -126,7 +126,20 @@ QWidget *MovePageContentsToTab(QWidget *page, const QString &title, QTabWidget *
 	nativeLayout->setSpacing(pageLayout->spacing());
 
 	while (QLayoutItem *item = pageLayout->takeAt(0)) {
-		nativeLayout->addItem(item);
+		if (QWidget *widget = item->widget()) {
+			// QLayout::takeAt() transfers the layout item, but it does not
+			// reparent the widget.  Leaving the native controls on the
+			// original settings page makes them continue painting over the
+			// dynamically-created tab pages.
+			widget->setParent(nativePage);
+			nativeLayout->addWidget(widget);
+			delete item;
+		} else if (QLayout *layout = item->layout()) {
+			nativeLayout->addLayout(layout);
+			delete item;
+		} else {
+			nativeLayout->addItem(item);
+		}
 	}
 
 	tabs = new QTabWidget(page);

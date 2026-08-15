@@ -41,6 +41,24 @@ jobs:
           }
           "Building ${Description} for Windows x64"
 
+      - name: Restore Windows dependency cache ⚡
+        id: windows-deps-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: .deps
+          key: windows-x64-deps-${{ hashFiles('CMakePresets.json') }}
+
+      - name: Restore Windows build cache ⚡
+        id: windows-build-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            build_x64
+            build_x86
+          key: windows-x64-build-${{ github.event.pull_request.number || github.ref_name }}-${{ github.sha }}-${{ hashFiles('CMakePresets.json', 'CMakeLists.txt', 'frontend/CMakeLists.txt', 'plugins/CMakeLists.txt') }}
+          restore-keys: |
+            windows-x64-build-${{ github.event.pull_request.number || github.ref_name }}-
+
       - name: Build OBS Studio 🧱
         uses: ./.github/actions/build-obs
         env:
@@ -56,6 +74,22 @@ jobs:
         with:
           target: x64
           config: RelWithDebInfo
+
+      - name: Save Windows dependency cache ⚡
+        if: success() && steps.windows-deps-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: .deps
+          key: windows-x64-deps-${{ hashFiles('CMakePresets.json') }}
+
+      - name: Save Windows build cache ⚡
+        if: success() && steps.windows-build-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            build_x64
+            build_x86
+          key: windows-x64-build-${{ github.event.pull_request.number || github.ref_name }}-${{ github.sha }}-${{ hashFiles('CMakePresets.json', 'CMakeLists.txt', 'frontend/CMakeLists.txt', 'plugins/CMakeLists.txt') }}
 
       - name: Package portable Win64 build 📦
         uses: ./.github/actions/package-obs
