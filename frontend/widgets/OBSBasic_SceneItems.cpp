@@ -1239,7 +1239,10 @@ static bool CenterAlignSelectedItems(obs_scene_t * /* scene */, obs_sceneitem_t 
 	}
 
 	obs_video_info ovi;
-	GetActiveCanvasVideoInfo(&ovi);
+	OBSBasic *main = OBSBasic::Get();
+	if (!main || !main->GetActiveCanvasVideoInfo(&ovi)) {
+		return true;
+	}
 
 	obs_transform_info itemInfo;
 	vec2_set(&itemInfo.pos, 0.0f, 0.0f);

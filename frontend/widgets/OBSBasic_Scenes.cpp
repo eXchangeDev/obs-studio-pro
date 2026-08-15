@@ -289,7 +289,7 @@ void OBSBasic::DuplicateSelectedScene()
 		}
 
 		OBSSceneAutoRelease scene = obs_scene_duplicate(curScene, name.c_str(), OBS_SCENE_DUP_REFS);
-		RemoveSceneSetVariants(scene);
+		RemoveSceneSetVariants(OBSScene(scene.Get()));
 		for (const OBS::Canvas &canvas : canvases) {
 			InitializeCanvasSceneSets(canvas, true, false);
 		}
