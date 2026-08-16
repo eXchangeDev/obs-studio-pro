@@ -247,6 +247,7 @@ void to_json(json &value, const Destination &destination)
 		     {"reconnect_retry_count", destination.reconnectRetryCount},
 		     {"reconnect_retry_seconds", destination.reconnectRetrySeconds},
 		     {"reconnect_enabled", destination.reconnectEnabled},
+		     {"dynamic_bitrate_enabled", destination.dynamicBitrateEnabled},
 		     {"use_authentication", destination.useAuthentication},
 		     {"enabled", destination.enabled}};
 }
@@ -267,6 +268,7 @@ void from_json(const json &value, Destination &destination)
 	destination.reconnectRetryCount = value.value("reconnect_retry_count", 0U);
 	destination.reconnectRetrySeconds = value.value("reconnect_retry_seconds", 0U);
 	destination.reconnectEnabled = value.value("reconnect_enabled", true);
+	destination.dynamicBitrateEnabled = value.value("dynamic_bitrate_enabled", false);
 	destination.useAuthentication = value.value("use_authentication", false);
 	destination.enabled = value.value("enabled", true);
 }

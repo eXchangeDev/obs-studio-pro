@@ -20,14 +20,23 @@
 #include "OutputRoute.hpp"
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include <obs.h>
+#include <obs.hpp>
 
 namespace OBS::Output {
+
+enum class RuntimeState {
+	Idle,
+	Starting,
+	Active,
+	Stopping,
+	Failed,
+};
 
 struct RuntimeOptions {
 	std::string bindIp = "default";
@@ -36,14 +45,13 @@ struct RuntimeOptions {
 	int reconnectRetrySeconds = 2;
 	uint32_t delaySeconds = 0;
 	uint32_t delayFlags = 0;
-};
-
-enum class RuntimeState {
-	Idle,
-	Starting,
-	Active,
-	Stopping,
-	Failed,
+	// Programs consumed by local outputs such as replay must keep their
+	// encoders prepared even when they currently have no transport endpoint.
+	std::vector<std::string> retainedProgramIds;
+	// Session transitions are reported after the destination state has been
+	// committed. This keeps the OBS aggregate facade out of transport callbacks
+	// while preserving independent session errors.
+	std::function<void(std::string_view, RuntimeState, std::string_view)> stateChanged;
 };
 
 struct DestinationSnapshot {
@@ -79,6 +87,8 @@ public:
 
 	bool Prepare(const RouteSet &routes, obs_output_t *referenceOutput, const RuntimeOptions &options,
 		     std::string &error);
+	bool Prepare(const RouteSet &routes, obs_encoder_t *referenceVideo, obs_encoder_t *referenceAudio,
+		     const RuntimeOptions &options, std::string &error);
 	size_t Start();
 	size_t StartSession(std::string_view sessionId);
 	void Stop(bool force = false);
@@ -89,6 +99,10 @@ public:
 	size_t PreparedDestinationCount() const;
 	std::vector<DestinationSnapshot> Snapshot() const;
 	std::vector<SessionSnapshot> SessionSnapshots() const;
+	OBSEncoderAutoRelease ProgramVideoEncoder(std::string_view programId) const;
+	OBSEncoderAutoRelease ProgramAudioEncoder(std::string_view programId) const;
+	OBSServiceAutoRelease SessionService(std::string_view sessionId) const;
+	OBSOutputAutoRelease SessionOutput(std::string_view sessionId) const;
 
 private:
 	struct Impl;

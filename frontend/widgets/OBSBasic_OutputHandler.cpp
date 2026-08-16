@@ -56,6 +56,18 @@ bool OBSBasic::Active() const
 	return outputHandler->Active();
 }
 
+size_t OBSBasic::StartPlatformSession(std::string_view sessionId)
+{
+	return outputHandler ? outputHandler->StartOutputSession(sessionId) : 0;
+}
+
+void OBSBasic::StopPlatformSession(std::string_view sessionId, bool force)
+{
+	if (outputHandler) {
+		outputHandler->StopOutputSession(sessionId, force);
+	}
+}
+
 void OBSBasic::ResizeOutputSizeOfSource()
 {
 	if (obs_video_active()) {

@@ -130,11 +130,14 @@ Destination DestinationFromEndpoint(const OutputEndpoint &endpoint, const std::s
 
 } // namespace
 
-PlatformSession::PlatformSession(PlatformSessionConfig config_) : config(std::move(config_)) {}
-
 void PlatformSession::AttachService(obs_service_t *value)
 {
 	service = value ? obs_service_get_ref(value) : nullptr;
+}
+
+void PlatformSession::AttachOutput(obs_output_t *value)
+{
+	output = value ? obs_output_get_ref(value) : nullptr;
 }
 
 void PlatformSession::AttachCapabilityProvider(std::shared_ptr<const PlatformCapabilityProvider> provider)
@@ -276,6 +279,17 @@ std::vector<std::string> Validate(const SessionSet &set)
 		AppendErrors(errors, Validate(session, set), "session[" + std::to_string(index) + "]: ");
 	}
 
+	if (!set.replayBuffer.programId.empty()) {
+		const auto program = std::find_if(set.programs.begin(), set.programs.end(), [&](const Program &item) {
+			return item.id == set.replayBuffer.programId;
+		});
+		if (program == set.programs.end()) {
+			errors.emplace_back("replay buffer references missing program " + set.replayBuffer.programId);
+		} else if (!program->enabled) {
+			errors.emplace_back("replay buffer references disabled program " + set.replayBuffer.programId);
+		}
+	}
+
 	return errors;
 }
 
@@ -312,13 +326,22 @@ SessionSet MigrateRouteSet(const RouteSet &routes)
 				config.platformId = destination.serviceName.empty() ? destination.service
 										    : destination.serviceName;
 				config.capabilities.standardStreaming = true;
+				config.dynamicBitrateEnabled = destination.dynamicBitrateEnabled;
 				config.programBindings.push_back(ProgramBinding{
 					route.id, route.primary ? "primary" : "secondary", route.failoverMode, true});
 				config.endpoints.push_back(EndpointFromDestination(destination));
 				result.sessions.emplace_back(std::move(config));
 			} else {
-				session->programBindings.push_back(ProgramBinding{
-					route.id, route.primary ? "primary" : "secondary", route.failoverMode, true});
+				const bool alreadyBound = std::any_of(
+					session->programBindings.begin(), session->programBindings.end(),
+					[&](const ProgramBinding &binding) { return binding.programId == route.id; });
+				if (!alreadyBound) {
+					session->programBindings.push_back(
+						ProgramBinding{route.id, route.primary ? "primary" : "secondary",
+							       route.failoverMode, true});
+				}
+				session->dynamicBitrateEnabled = session->dynamicBitrateEnabled ||
+								 destination.dynamicBitrateEnabled;
 				session->endpoints.push_back(EndpointFromDestination(destination));
 			}
 		}
@@ -327,17 +350,125 @@ SessionSet MigrateRouteSet(const RouteSet &routes)
 	const auto primary = std::find_if(routes.routes.begin(), routes.routes.end(),
 					  [](const Route &route) { return route.primary; });
 	if (primary != routes.routes.end()) {
-		for (PlatformSessionConfig &session : result.sessions) {
-			const bool ownsPrimary =
-				std::any_of(session.programBindings.begin(), session.programBindings.end(),
-					    [&](const ProgramBinding &binding) {
-						    return binding.enabled && binding.programId == primary->id;
-					    });
-			if (ownsPrimary) {
-				session.compatibilityDefault = true;
-				break;
+		PlatformSessionConfig compatibility;
+		compatibility.id = "stream1";
+		compatibility.name = "Primary Stream";
+		compatibility.platformId = "obs-service";
+		compatibility.authenticationReference = "stream1";
+		compatibility.compatibilityDefault = true;
+		compatibility.programBindings.push_back({primary->id, "primary", FailoverMode::None, true});
+		result.sessions.insert(result.sessions.begin(), std::move(compatibility));
+	}
+
+	return result;
+}
+
+SessionSet ReconcileRouteSet(const SessionSet &existing, const RouteSet &routes)
+{
+	SessionSet result = MigrateRouteSet(routes);
+	result.replayBuffer = existing.replayBuffer;
+
+	// RouteSet is a compatibility projection and intentionally does not expose
+	// all Program-owned settings. Preserve those fields while applying edits
+	// made through the existing route UI.
+	for (Program &program : result.programs) {
+		const auto previous = std::find_if(existing.programs.begin(), existing.programs.end(),
+						   [&](const Program &item) { return item.id == program.id; });
+		if (previous == existing.programs.end()) {
+			continue;
+		}
+
+		program.videoFormat = previous->videoFormat;
+		program.recordingEligible = previous->recordingEligible;
+		program.replayEligible = previous->replayEligible;
+	}
+
+	for (PlatformSessionConfig &session : result.sessions) {
+		const auto previous =
+			std::find_if(existing.sessions.begin(), existing.sessions.end(),
+				     [&](const PlatformSessionConfig &item) { return item.id == session.id; });
+		if (previous == existing.sessions.end()) {
+			continue;
+		}
+
+		session.authenticationReference = previous->authenticationReference;
+		session.nativeDockId = previous->nativeDockId;
+		session.deliveryMode = previous->deliveryMode;
+		session.multitrackConfig = previous->multitrackConfig;
+		session.capabilities = previous->capabilities;
+		session.dynamicBitrateEnabled = previous->dynamicBitrateEnabled;
+		session.enabled = previous->enabled;
+		session.compatibilityDefault = previous->compatibilityDefault || session.id == "stream1";
+		if (session.platformId.empty() || session.platformId == "obs-service") {
+			session.platformId = previous->platformId;
+		}
+		if (session.endpoints.empty()) {
+			session.name = previous->name;
+		}
+
+		for (ProgramBinding &binding : session.programBindings) {
+			const auto previousBinding = std::find_if(
+				previous->programBindings.begin(), previous->programBindings.end(),
+				[&](const ProgramBinding &item) { return item.programId == binding.programId; });
+			if (previousBinding != previous->programBindings.end()) {
+				binding.role = previousBinding->role;
 			}
 		}
+
+		// Native provider sessions have no compatibility endpoint, so RouteSet
+		// cannot represent secondary Program bindings such as a vertical
+		// Enhanced Broadcasting canvas. Keep those bindings explicitly.
+		if (session.endpoints.empty()) {
+			for (const ProgramBinding &binding : previous->programBindings) {
+				const bool programExists = std::any_of(result.programs.begin(), result.programs.end(),
+								       [&](const Program &program) {
+									       return program.id == binding.programId;
+								       });
+				const bool alreadyBound =
+					std::any_of(session.programBindings.begin(), session.programBindings.end(),
+						    [&](const ProgramBinding &item) {
+							    return item.programId == binding.programId;
+						    });
+				if (programExists && !alreadyBound) {
+					session.programBindings.emplace_back(binding);
+				}
+			}
+		}
+	}
+
+	// Preserve provider-native sessions which are not expressible as route
+	// endpoints. Sessions with endpoints are intentionally omitted when their
+	// last destination is removed in the route UI.
+	for (const PlatformSessionConfig &previous : existing.sessions) {
+		const bool exists =
+			std::any_of(result.sessions.begin(), result.sessions.end(),
+				    [&](const PlatformSessionConfig &session) { return session.id == previous.id; });
+		if (exists || !previous.endpoints.empty()) {
+			continue;
+		}
+
+		PlatformSessionConfig preserved = previous;
+		preserved.programBindings.erase(
+			std::remove_if(preserved.programBindings.begin(), preserved.programBindings.end(),
+				       [&](const ProgramBinding &binding) {
+					       return std::none_of(result.programs.begin(), result.programs.end(),
+								   [&](const Program &program) {
+									   return program.id == binding.programId;
+								   });
+				       }),
+			preserved.programBindings.end());
+		if (!preserved.programBindings.empty()) {
+			result.sessions.emplace_back(std::move(preserved));
+		}
+	}
+
+	const auto replayProgram = std::find_if(result.programs.begin(), result.programs.end(), [&](Program &program) {
+		return program.id == result.replayBuffer.programId;
+	});
+	if (!result.replayBuffer.programId.empty() && replayProgram == result.programs.end()) {
+		result.replayBuffer.programId.clear();
+	} else if (replayProgram != result.programs.end()) {
+		replayProgram->replayEligible = true;
 	}
 
 	return result;
@@ -382,7 +513,9 @@ RouteSet ToRouteSet(const SessionSet &set)
 				failoverModeSet = true;
 			}
 			for (const OutputEndpoint &endpoint : session.endpoints) {
-				route.destinations.emplace_back(DestinationFromEndpoint(endpoint, session.id));
+				auto destination = DestinationFromEndpoint(endpoint, session.id);
+				destination.dynamicBitrateEnabled = session.dynamicBitrateEnabled;
+				route.destinations.emplace_back(std::move(destination));
 			}
 		}
 
@@ -541,6 +674,7 @@ void to_json(json &value, const PlatformSessionConfig &session)
 		     {"capabilities", session.capabilities},
 		     {"program_bindings", session.programBindings},
 		     {"endpoints", session.endpoints},
+		     {"dynamic_bitrate_enabled", session.dynamicBitrateEnabled},
 		     {"enabled", session.enabled},
 		     {"compatibility_default", session.compatibilityDefault}};
 }
@@ -559,13 +693,27 @@ void from_json(const json &value, PlatformSessionConfig &session)
 	session.capabilities = value.value("capabilities", PlatformCapabilities{});
 	session.programBindings = value.value("program_bindings", std::vector<ProgramBinding>{});
 	session.endpoints = value.value("endpoints", std::vector<OutputEndpoint>{});
+	session.dynamicBitrateEnabled = value.value("dynamic_bitrate_enabled", false);
 	session.enabled = value.value("enabled", true);
 	session.compatibilityDefault = value.value("compatibility_default", false);
 }
 
+void to_json(json &value, const ReplayBufferConfig &replayBuffer)
+{
+	value = json{{"program_id", replayBuffer.programId}};
+}
+
+void from_json(const json &value, ReplayBufferConfig &replayBuffer)
+{
+	replayBuffer.programId = value.value("program_id", std::string{});
+}
+
 void to_json(json &value, const SessionSet &set)
 {
-	value = json{{"schema_version", set.schemaVersion}, {"programs", set.programs}, {"sessions", set.sessions}};
+	value = json{{"schema_version", set.schemaVersion},
+		     {"programs", set.programs},
+		     {"sessions", set.sessions},
+		     {"replay_buffer", set.replayBuffer}};
 }
 
 void from_json(const json &value, SessionSet &set)
@@ -573,6 +721,7 @@ void from_json(const json &value, SessionSet &set)
 	set.schemaVersion = value.value("schema_version", PlatformSessionSchemaVersion);
 	set.programs = value.value("programs", std::vector<Program>{});
 	set.sessions = value.value("sessions", std::vector<PlatformSessionConfig>{});
+	set.replayBuffer = value.value("replay_buffer", ReplayBufferConfig{});
 }
 
 std::string Serialize(const SessionSet &set)

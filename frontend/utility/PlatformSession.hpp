@@ -30,6 +30,8 @@
 
 #include <nlohmann/json_fwd.hpp>
 
+struct MultitrackVideoOutput;
+
 namespace OBS::Output {
 
 constexpr uint32_t PlatformSessionSchemaVersion = 1;
@@ -127,8 +129,16 @@ struct PlatformSessionConfig {
 	PlatformCapabilities capabilities;
 	std::vector<ProgramBinding> programBindings;
 	std::vector<OutputEndpoint> endpoints;
+	bool dynamicBitrateEnabled = false;
 	bool enabled = true;
 	bool compatibilityDefault = false;
+};
+
+struct ReplayBufferConfig {
+	// Empty keeps OBS' existing recording/replay encoder selection. A value
+	// binds the replay buffer to the local encoded Program before any platform
+	// transport consumes it.
+	std::string programId;
 };
 
 // Runtime ownership is deliberately separate from persisted configuration.
@@ -137,7 +147,7 @@ struct PlatformSessionConfig {
 class PlatformSession {
 public:
 	explicit PlatformSession(PlatformSessionConfig config = {});
-	~PlatformSession() = default;
+	~PlatformSession();
 
 	PlatformSession(const PlatformSession &) = delete;
 	PlatformSession &operator=(const PlatformSession &) = delete;
@@ -149,6 +159,16 @@ public:
 
 	void AttachService(obs_service_t *service);
 	obs_service_t *Service() const { return service; }
+	void AttachOutput(obs_output_t *output);
+	obs_output_t *Output() const { return output; }
+	::MultitrackVideoOutput &EnsureMultitrackOutput();
+	::MultitrackVideoOutput *MultitrackOutput() const { return multitrackOutput.get(); }
+	void ResetMultitrackOutput();
+	OBSSignal &StartingSignal() { return startingSignal; }
+	OBSSignal &StoppingSignal() { return stoppingSignal; }
+	OBSSignal &StartedSignal() { return startedSignal; }
+	OBSSignal &StoppedSignal() { return stoppedSignal; }
+	void DisconnectOutputSignals();
 	void AttachCapabilityProvider(std::shared_ptr<const PlatformCapabilityProvider> provider);
 	const PlatformCapabilityProvider *CapabilityProvider() const { return capabilityProvider.get(); }
 
@@ -161,6 +181,12 @@ public:
 private:
 	PlatformSessionConfig config;
 	OBSServiceAutoRelease service;
+	OBSOutputAutoRelease output;
+	std::unique_ptr<::MultitrackVideoOutput> multitrackOutput;
+	OBSSignal startingSignal;
+	OBSSignal stoppingSignal;
+	OBSSignal startedSignal;
+	OBSSignal stoppedSignal;
 	std::shared_ptr<const PlatformCapabilityProvider> capabilityProvider;
 	SessionRuntimeState state = SessionRuntimeState::Idle;
 	std::string lastError;
@@ -170,6 +196,7 @@ struct SessionSet {
 	uint32_t schemaVersion = PlatformSessionSchemaVersion;
 	std::vector<Program> programs;
 	std::vector<PlatformSessionConfig> sessions;
+	ReplayBufferConfig replayBuffer;
 };
 
 const char *ToString(DeliveryMode mode);
@@ -182,6 +209,10 @@ std::vector<std::string> Validate(const SessionSet &set);
 // Convert the current fork's route model into the new persisted model. The
 // conversion is deterministic and leaves the legacy RouteSet untouched.
 SessionSet MigrateRouteSet(const RouteSet &routes);
+
+// Applies changes made through the route compatibility UI while preserving
+// session-owned provider/auth/capability state and replay selection.
+SessionSet ReconcileRouteSet(const SessionSet &existing, const RouteSet &routes);
 
 // Compatibility projection used by the existing settings and output paths.
 RouteSet ToRouteSet(const SessionSet &set);
@@ -196,6 +227,8 @@ void to_json(nlohmann::json &json, const PlatformCapabilities &capabilities);
 void from_json(const nlohmann::json &json, PlatformCapabilities &capabilities);
 void to_json(nlohmann::json &json, const PlatformSessionConfig &session);
 void from_json(const nlohmann::json &json, PlatformSessionConfig &session);
+void to_json(nlohmann::json &json, const ReplayBufferConfig &replayBuffer);
+void from_json(const nlohmann::json &json, ReplayBufferConfig &replayBuffer);
 void to_json(nlohmann::json &json, const SessionSet &set);
 void from_json(const nlohmann::json &json, SessionSet &set);
 

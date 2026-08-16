@@ -43,6 +43,7 @@
 #include <QSystemTrayIcon>
 
 #include <deque>
+#include <string_view>
 
 extern volatile bool recording_paused;
 
@@ -681,6 +682,10 @@ private:
 	 * MARK: - OBSBasic_OutputHandler
 	 * -------------------------------------
 	 */
+public:
+	size_t StartPlatformSession(std::string_view sessionId);
+	void StopPlatformSession(std::string_view sessionId, bool force = false);
+
 private:
 	std::unique_ptr<BasicOutputHandler> outputHandler;
 	std::optional<std::pair<uint32_t, uint32_t>> lastOutputResolution;

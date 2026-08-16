@@ -184,12 +184,63 @@ struct Runtime::Impl {
 	mutable std::mutex mutex;
 	std::atomic_bool intentionalStop{false};
 
+	void NotifyStateChanged(const DestinationRuntime &destination)
+	{
+		if (!options.stateChanged) {
+			return;
+		}
+
+		bool active = false;
+		bool starting = false;
+		bool stopping = false;
+		bool failed = false;
+		std::string error;
+		{
+			std::lock_guard lock(mutex);
+			for (const auto &route : routes) {
+				for (const auto &item : route->destinations) {
+					if (item->config.sessionId != destination.config.sessionId) {
+						continue;
+					}
+					switch (item->state.load()) {
+					case RuntimeState::Active:
+						active = true;
+						break;
+					case RuntimeState::Starting:
+						starting = true;
+						break;
+					case RuntimeState::Stopping:
+						stopping = true;
+						break;
+					case RuntimeState::Failed:
+						failed = true;
+						if (error.empty()) {
+							error = item->lastError;
+						}
+						break;
+					case RuntimeState::Idle:
+						break;
+					}
+				}
+			}
+		}
+		const RuntimeState state = active     ? RuntimeState::Active
+					   : starting ? RuntimeState::Starting
+					   : stopping ? RuntimeState::Stopping
+					   : failed   ? RuntimeState::Failed
+						      : RuntimeState::Idle;
+		options.stateChanged(destination.config.sessionId, state, error);
+	}
+
 	static void OutputStarted(void *data, calldata_t *)
 	{
 		auto *destination = static_cast<DestinationRuntime *>(data);
 		destination->state.store(RuntimeState::Active);
-		std::lock_guard lock(destination->owner->mutex);
-		destination->lastError.clear();
+		{
+			std::lock_guard lock(destination->owner->mutex);
+			destination->lastError.clear();
+		}
+		destination->owner->NotifyStateChanged(*destination);
 	}
 
 	static void OutputStopped(void *data, calldata_t *params)
@@ -212,6 +263,7 @@ struct Runtime::Impl {
 		if (owner->intentionalStop.load() || destination->intentionalStop.load() ||
 		    destination->route->config.failoverMode != FailoverMode::ClientSequential) {
 			destination->state.store(finalState);
+			owner->NotifyStateChanged(*destination);
 			return;
 		}
 
@@ -220,6 +272,7 @@ struct Runtime::Impl {
 					    [destination](const auto &item) { return item.get() == destination; });
 		if (current == destinations.end()) {
 			destination->state.store(finalState);
+			owner->NotifyStateChanged(*destination);
 			return;
 		}
 
@@ -229,12 +282,19 @@ struct Runtime::Impl {
 			}
 		}
 		destination->state.store(finalState);
+		owner->NotifyStateChanged(*destination);
 	}
 
 	bool StartDestination(DestinationRuntime &destination)
 	{
+		const RuntimeState currentState = destination.state.load();
+		if (currentState == RuntimeState::Starting || currentState == RuntimeState::Active ||
+		    currentState == RuntimeState::Stopping || obs_output_active(destination.output)) {
+			return false;
+		}
 		destination.intentionalStop.store(false);
 		destination.state.store(RuntimeState::Starting);
+		NotifyStateChanged(destination);
 		if (obs_output_start(destination.output)) {
 			return true;
 		}
@@ -245,6 +305,7 @@ struct Runtime::Impl {
 			std::lock_guard lock(mutex);
 			destination.lastError = lastError && *lastError ? lastError : "output failed to start";
 		}
+		NotifyStateChanged(destination);
 		return false;
 	}
 };
@@ -259,6 +320,18 @@ Runtime::~Runtime()
 bool Runtime::Prepare(const RouteSet &routeSet, obs_output_t *referenceOutput, const RuntimeOptions &options,
 		      std::string &error)
 {
+	if (!referenceOutput) {
+		error = "the reference stream output is missing";
+		return false;
+	}
+
+	return Prepare(routeSet, obs_output_get_video_encoder(referenceOutput),
+		       obs_output_get_audio_encoder(referenceOutput, 0), options, error);
+}
+
+bool Runtime::Prepare(const RouteSet &routeSet, obs_encoder_t *referenceVideo, obs_encoder_t *referenceAudio,
+		      const RuntimeOptions &options, std::string &error)
+{
 	if (Active()) {
 		error = "additional outputs are still active";
 		return false;
@@ -268,8 +341,8 @@ bool Runtime::Prepare(const RouteSet &routeSet, obs_output_t *referenceOutput, c
 	impl->options = options;
 	impl->intentionalStop.store(false);
 
-	if (!referenceOutput) {
-		error = "the reference stream output is missing";
+	if (!referenceVideo || !referenceAudio) {
+		error = "the reference stream encoders are missing";
 		return false;
 	}
 
@@ -279,9 +352,6 @@ bool Runtime::Prepare(const RouteSet &routeSet, obs_output_t *referenceOutput, c
 		return false;
 	}
 
-	obs_encoder_t *referenceVideo = obs_output_get_video_encoder(referenceOutput);
-	obs_encoder_t *referenceAudio = obs_output_get_audio_encoder(referenceOutput, 0);
-
 	for (const Route &route : routeSet.routes) {
 		if (!route.enabled || route.kind != Kind::Stream) {
 			continue;
@@ -290,7 +360,9 @@ bool Runtime::Prepare(const RouteSet &routeSet, obs_output_t *referenceOutput, c
 		const bool hasEnabledDestination =
 			std::any_of(route.destinations.begin(), route.destinations.end(),
 				    [](const Destination &destination) { return destination.enabled; });
-		if (!hasEnabledDestination) {
+		const bool retained = std::find(options.retainedProgramIds.begin(), options.retainedProgramIds.end(),
+						route.id) != options.retainedProgramIds.end();
+		if (!hasEnabledDestination && !retained) {
 			continue;
 		}
 
@@ -316,6 +388,17 @@ bool Runtime::Prepare(const RouteSet &routeSet, obs_output_t *referenceOutput, c
 			impl->routes.clear();
 			return false;
 		}
+
+		std::unordered_map<std::string, size_t> endpointCountBySession;
+		for (const Destination &destination : route.destinations) {
+			if (!destination.enabled) {
+				continue;
+			}
+			const std::string sessionId = destination.sessionId.empty() ? "session-" + destination.id
+										    : destination.sessionId;
+			++endpointCountBySession[sessionId];
+		}
+		const bool encoderOwnedByOneSession = endpointCountBySession.size() <= 1;
 
 		for (const Destination &destination : route.destinations) {
 			if (!destination.enabled) {
@@ -365,9 +448,18 @@ bool Runtime::Prepare(const RouteSet &routeSet, obs_output_t *referenceOutput, c
 			OBSDataAutoRelease outputSettings = obs_data_create();
 			obs_data_set_string(outputSettings, "bind_ip", options.bindIp.c_str());
 			obs_data_set_string(outputSettings, "ip_family", options.ipFamily.c_str());
-			// Independent dynamic-bitrate controllers would fight over a shared
-			// encoder, so additional fan-out outputs deliberately leave it off.
-			obs_data_set_bool(outputSettings, "dyn_bitrate", false);
+			const size_t sessionEndpointCount =
+				endpointCountBySession[runtimeDestination->config.sessionId];
+			const bool controllerIsolated =
+				encoderOwnedByOneSession &&
+				(sessionEndpointCount <= 1 || route.failoverMode == FailoverMode::ClientSequential);
+			const bool dynamicBitrate = destination.dynamicBitrateEnabled && controllerIsolated;
+			if (destination.dynamicBitrateEnabled && !controllerIsolated) {
+				blog(LOG_WARNING,
+				     "OBS Studio Pro: dynamic bitrate disabled for session '%s' because its Program encoder is shared by parallel outputs",
+				     runtimeDestination->config.sessionId.c_str());
+			}
+			obs_data_set_bool(outputSettings, "dyn_bitrate", dynamicBitrate);
 			obs_output_update(runtimeDestination->output, outputSettings);
 			obs_output_set_delay(runtimeDestination->output, options.delaySeconds, options.delayFlags);
 			const int reconnectRetryCount = destination.reconnectEnabled
@@ -476,6 +568,7 @@ void Runtime::Stop(bool force)
 				continue;
 			}
 			destination->state.store(RuntimeState::Stopping);
+			impl->NotifyStateChanged(*destination);
 			outputs.emplace_back(obs_output_get_ref(destination->output));
 		}
 	}
@@ -507,6 +600,7 @@ void Runtime::StopSession(std::string_view sessionId, bool force)
 				continue;
 			}
 			destination->state.store(RuntimeState::Stopping);
+			impl->NotifyStateChanged(*destination);
 			outputs.emplace_back(obs_output_get_ref(destination->output));
 		}
 	}
@@ -575,7 +669,15 @@ std::vector<DestinationSnapshot> Runtime::Snapshot() const
 
 std::vector<SessionSnapshot> Runtime::SessionSnapshots() const
 {
-	std::vector<SessionSnapshot> snapshots;
+	struct Aggregate {
+		SessionSnapshot snapshot;
+		bool active = false;
+		bool starting = false;
+		bool stopping = false;
+		bool failed = false;
+	};
+
+	std::vector<Aggregate> aggregates;
 	std::unordered_map<std::string, size_t> indexes;
 	std::lock_guard lock(impl->mutex);
 
@@ -584,32 +686,93 @@ std::vector<SessionSnapshot> Runtime::SessionSnapshots() const
 			const std::string &sessionId = destination->config.sessionId;
 			auto index = indexes.find(sessionId);
 			if (index == indexes.end()) {
-				indexes.emplace(sessionId, snapshots.size());
-				snapshots.push_back(SessionSnapshot{});
-				snapshots.back().sessionId = sessionId;
+				indexes.emplace(sessionId, aggregates.size());
+				aggregates.emplace_back();
+				aggregates.back().snapshot.sessionId = sessionId;
 				index = indexes.find(sessionId);
 			}
 
-			SessionSnapshot &snapshot = snapshots[index->second];
+			Aggregate &aggregate = aggregates[index->second];
+			SessionSnapshot &snapshot = aggregate.snapshot;
 			snapshot.endpointCount++;
 			const RuntimeState state = destination->state.load();
-			if (state == RuntimeState::Failed ||
-			    (!snapshot.lastError.empty() && state != RuntimeState::Active)) {
-				snapshot.state = RuntimeState::Failed;
+			switch (state) {
+			case RuntimeState::Active:
+				aggregate.active = true;
+				break;
+			case RuntimeState::Starting:
+				aggregate.starting = true;
+				break;
+			case RuntimeState::Stopping:
+				aggregate.stopping = true;
+				break;
+			case RuntimeState::Failed:
+				aggregate.failed = true;
 				if (snapshot.lastError.empty()) {
 					snapshot.lastError = destination->lastError;
 				}
-			} else if (state == RuntimeState::Stopping) {
-				snapshot.state = RuntimeState::Stopping;
-			} else if (state == RuntimeState::Starting) {
-				snapshot.state = RuntimeState::Starting;
-			} else if (state == RuntimeState::Active) {
-				snapshot.state = RuntimeState::Active;
+				break;
+			case RuntimeState::Idle:
+				break;
 			}
 		}
 	}
 
+	std::vector<SessionSnapshot> snapshots;
+	snapshots.reserve(aggregates.size());
+	for (auto &aggregate : aggregates) {
+		aggregate.snapshot.state = aggregate.active     ? RuntimeState::Active
+					   : aggregate.starting ? RuntimeState::Starting
+					   : aggregate.stopping ? RuntimeState::Stopping
+					   : aggregate.failed   ? RuntimeState::Failed
+								: RuntimeState::Idle;
+		snapshots.emplace_back(std::move(aggregate.snapshot));
+	}
 	return snapshots;
+}
+
+OBSEncoderAutoRelease Runtime::ProgramVideoEncoder(std::string_view programId) const
+{
+	for (const auto &route : impl->routes) {
+		if (route->config.id == programId && route->videoEncoder) {
+			return obs_encoder_get_ref(route->videoEncoder);
+		}
+	}
+	return nullptr;
+}
+
+OBSEncoderAutoRelease Runtime::ProgramAudioEncoder(std::string_view programId) const
+{
+	for (const auto &route : impl->routes) {
+		if (route->config.id == programId && route->audioEncoder) {
+			return obs_encoder_get_ref(route->audioEncoder);
+		}
+	}
+	return nullptr;
+}
+
+OBSServiceAutoRelease Runtime::SessionService(std::string_view sessionId) const
+{
+	for (const auto &route : impl->routes) {
+		for (const auto &destination : route->destinations) {
+			if (destination->config.sessionId == sessionId && destination->service) {
+				return obs_service_get_ref(destination->service);
+			}
+		}
+	}
+	return nullptr;
+}
+
+OBSOutputAutoRelease Runtime::SessionOutput(std::string_view sessionId) const
+{
+	for (const auto &route : impl->routes) {
+		for (const auto &destination : route->destinations) {
+			if (destination->config.sessionId == sessionId && destination->output) {
+				return obs_output_get_ref(destination->output);
+			}
+		}
+	}
+	return nullptr;
 }
 
 } // namespace OBS::Output

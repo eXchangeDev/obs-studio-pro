@@ -29,7 +29,7 @@ public:
 			      OBS::Output::MultitrackConfigProvider config_provider,
 			      obs_data_t *dump_stream_to_file_config, size_t main_audio_mixer,
 			      std::optional<size_t> vod_track_mixer, std::optional<bool> use_rtmps,
-			      std::optional<QString> extra_canvas);
+			      const std::vector<std::string> &canvas_uuids);
 	signal_handler_t *StreamingSignalHandler();
 	void StartedStreaming();
 	void StopStreaming();

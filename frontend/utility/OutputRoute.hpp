@@ -76,6 +76,7 @@ struct Destination {
 	uint32_t reconnectRetryCount = 0;
 	uint32_t reconnectRetrySeconds = 0;
 	bool reconnectEnabled = true;
+	bool dynamicBitrateEnabled = false;
 	bool useAuthentication = false;
 	bool enabled = true;
 };

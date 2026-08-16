@@ -45,6 +45,7 @@ target_sources(
     utility/OutputRouteRuntime.hpp
     utility/PlatformSession.cpp
     utility/PlatformSession.hpp
+    utility/PlatformSessionRuntime.cpp
     utility/PreviewProgramSizeObserver.cpp
     utility/PreviewProgramSizeObserver.hpp
     utility/QuickTransition.cpp

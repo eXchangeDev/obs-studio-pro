@@ -346,7 +346,7 @@ void MultitrackVideoOutput::PrepareStreaming(
 	const QString &stream_key, const char *audio_encoder_id, std::optional<uint32_t> maximum_aggregate_bitrate,
 	std::optional<uint32_t> maximum_video_tracks, OBS::Output::MultitrackConfigProvider config_provider,
 	obs_data_t *dump_stream_to_file_config, size_t main_audio_mixer, std::optional<size_t> vod_track_mixer,
-	std::optional<bool> use_rtmps, std::optional<QString> extra_canvas)
+	std::optional<bool> use_rtmps, const std::vector<std::string> &canvas_uuids)
 {
 	{
 		const std::lock_guard<std::mutex> current_lock{current_mutex};
@@ -374,14 +374,24 @@ void MultitrackVideoOutput::PrepareStreaming(
 	auto auto_config_url_data = auto_config_url.toUtf8();
 
 	std::vector<OBSCanvasAutoRelease> canvases;
-
-	canvases.emplace_back(obs_get_main_canvas());
-	if (extra_canvas) {
-		obs_canvas_t *canvas = obs_get_canvas_by_uuid(extra_canvas->toUtf8().constData());
-		if (!canvas) {
-			throw MultitrackVideoError::critical(QTStr("FailedToStartStream.MissingCanvas"));
+	if (canvas_uuids.empty()) {
+		canvases.emplace_back(obs_get_main_canvas());
+	} else {
+		for (const std::string &uuid : canvas_uuids) {
+			obs_canvas_t *canvas = obs_get_canvas_by_uuid(uuid.c_str());
+			if (!canvas) {
+				throw MultitrackVideoError::critical(QTStr("FailedToStartStream.MissingCanvas"));
+			}
+			const bool duplicate = std::any_of(canvases.begin(), canvases.end(),
+							   [canvas](const OBSCanvasAutoRelease &item) {
+								   return item.Get() == canvas;
+							   });
+			if (duplicate) {
+				obs_canvas_release(canvas);
+				continue;
+			}
+			canvases.emplace_back(canvas);
 		}
-		canvases.emplace_back(canvas);
 	}
 
 	std::string canvasNames;

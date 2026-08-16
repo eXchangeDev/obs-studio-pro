@@ -645,6 +645,11 @@ std::shared_future<void> AdvancedOutput::SetupStreaming(obs_service_t *service,
 	if (auth) {
 		auth->OnStreamConfig();
 	}
+	auto *compatibilitySession = PrepareCompatibilitySession(service);
+	if (!compatibilitySession) {
+		continuation(false);
+		return StartMultitrackVideoStreamingGuard::MakeReadyFuture();
+	}
 
 	/* --------------------- */
 
@@ -657,7 +662,8 @@ std::shared_future<void> AdvancedOutput::SetupStreaming(obs_service_t *service,
 	const char *audio_encoder_id = config_get_string(main->Config(), "AdvOut", "AudioEncoder");
 	int streamTrackIndex = config_get_int(main->Config(), "AdvOut", "TrackIndex") - 1;
 
-	auto handle_multitrack_video_result = [this, type = std::string{type}, is_multitrack_output,
+	auto handle_multitrack_video_result = [this, compatibilitySession, type = std::string{type},
+					       is_multitrack_output,
 					       multiTrackAudioMixes](std::optional<bool> multitrackVideoResult) {
 		if (multitrackVideoResult.has_value()) {
 			outputRoutes.Clear();
@@ -680,16 +686,6 @@ std::shared_future<void> AdvancedOutput::SetupStreaming(obs_service_t *service,
 				return false;
 			}
 
-			streamDelayStarting.Connect(obs_output_get_signal_handler(streamOutput), "starting",
-						    OBSStreamStarting, this);
-			streamStopping.Connect(obs_output_get_signal_handler(streamOutput), "stopping",
-					       OBSStreamStopping, this);
-
-			startStreaming.Connect(obs_output_get_signal_handler(streamOutput), "start", OBSStartStreaming,
-					       this);
-			stopStreaming.Connect(obs_output_get_signal_handler(streamOutput), "stop", OBSStopStreaming,
-					      this);
-
 			outputType = type;
 		}
 
@@ -711,11 +707,18 @@ std::shared_future<void> AdvancedOutput::SetupStreaming(obs_service_t *service,
 			}
 		}
 
+		compatibilitySession->AttachOutput(streamOutput);
+		compatibilitySession->DisconnectOutputSignals();
+		auto *signals = obs_output_get_signal_handler(streamOutput);
+		compatibilitySession->StartingSignal().Connect(signals, "starting", OBSStreamStarting, this);
+		compatibilitySession->StoppingSignal().Connect(signals, "stopping", OBSStreamStopping, this);
+		compatibilitySession->StartedSignal().Connect(signals, "start", OBSStartStreaming, this);
+		compatibilitySession->StoppedSignal().Connect(signals, "stop", OBSStopStreaming, this);
 		PrepareOutputRoutes(streamOutput);
 		return true;
 	};
 
-	return SetupMultitrackVideo(service, audio_encoder_id, static_cast<size_t>(streamTrackIndex),
+	return SetupMultitrackVideo(*compatibilitySession, audio_encoder_id, static_cast<size_t>(streamTrackIndex),
 				    VodTrackMixerIdx(service), [=](std::optional<bool> res) {
 					    continuation(handle_multitrack_video_result(res));
 				    });
@@ -771,6 +774,9 @@ bool AdvancedOutput::StartStreaming(obs_service_t *service)
 	if (is_rtmp) {
 		SetupVodTrack(service);
 	}
+	if (compatibilitySession) {
+		compatibilitySession->SetState(OBS::Output::SessionRuntimeState::Starting);
+	}
 	if (obs_output_start(streamOutput)) {
 		if (!multitrackVideo || !multitrackVideoActive) {
 			StartOutputRoutes();
@@ -792,6 +798,9 @@ bool AdvancedOutput::StartStreaming(obs_service_t *service)
 		lastError = error;
 	} else {
 		lastError = string();
+	}
+	if (compatibilitySession) {
+		compatibilitySession->SetError(hasLastError ? error : "stream output failed to start");
 	}
 
 	const char *type = obs_output_get_id(streamOutput);
@@ -931,6 +940,13 @@ bool AdvancedOutput::StartReplayBuffer()
 		obs_output_update(replayBuffer, settings);
 	}
 
+	std::string programError;
+	if (ConfigureReplayBufferProgram(videoStreaming, streamAudioEnc, programError) ==
+	    ReplayProgramBindingResult::Failed) {
+		QMessageBox::critical(main, QTStr("Output.StartReplayFailed"), QString::fromUtf8(programError.c_str()));
+		return false;
+	}
+
 	if (!obs_output_start(replayBuffer)) {
 		QString error_reason;
 		const char *error = obs_output_get_last_error(replayBuffer);
@@ -950,12 +966,22 @@ void AdvancedOutput::StopStreaming(bool force)
 {
 	StopOutputRoutes(force);
 	auto output = StreamingOutput();
+	const bool outputWasActive = output && obs_output_active(output);
+	if (outputWasActive && compatibilitySession) {
+		compatibilitySession->SetState(OBS::Output::SessionRuntimeState::Stopping);
+	}
 	if (force && output) {
 		obs_output_force_stop(output);
 	} else if (multitrackVideo && multitrackVideoActive) {
 		multitrackVideo->StopStreaming();
-	} else {
+	} else if (output) {
 		obs_output_stop(output);
+	}
+	if (!outputWasActive) {
+		if (compatibilitySession) {
+			compatibilitySession->SetState(OBS::Output::SessionRuntimeState::Idle);
+		}
+		UpdateAggregateStreamingState();
 	}
 }
 
@@ -979,7 +1005,7 @@ void AdvancedOutput::StopReplayBuffer(bool force)
 
 bool AdvancedOutput::StreamingActive() const
 {
-	return obs_output_active(StreamingOutput());
+	return obs_output_active(StreamingOutput()) || outputRoutes.Active();
 }
 
 bool AdvancedOutput::RecordingActive() const
