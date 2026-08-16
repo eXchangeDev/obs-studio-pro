@@ -709,11 +709,11 @@ std::shared_future<void> AdvancedOutput::SetupStreaming(obs_service_t *service,
 
 		compatibilitySession->AttachOutput(streamOutput);
 		compatibilitySession->DisconnectOutputSignals();
-		auto *signals = obs_output_get_signal_handler(streamOutput);
-		compatibilitySession->StartingSignal().Connect(signals, "starting", OBSStreamStarting, this);
-		compatibilitySession->StoppingSignal().Connect(signals, "stopping", OBSStreamStopping, this);
-		compatibilitySession->StartedSignal().Connect(signals, "start", OBSStartStreaming, this);
-		compatibilitySession->StoppedSignal().Connect(signals, "stop", OBSStopStreaming, this);
+		auto *signalHandler = obs_output_get_signal_handler(streamOutput);
+		compatibilitySession->StartingSignal().Connect(signalHandler, "starting", OBSStreamStarting, this);
+		compatibilitySession->StoppingSignal().Connect(signalHandler, "stopping", OBSStreamStopping, this);
+		compatibilitySession->StartedSignal().Connect(signalHandler, "start", OBSStartStreaming, this);
+		compatibilitySession->StoppedSignal().Connect(signalHandler, "stop", OBSStopStreaming, this);
 		PrepareOutputRoutes(streamOutput);
 		return true;
 	};

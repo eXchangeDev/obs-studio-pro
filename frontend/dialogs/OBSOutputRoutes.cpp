@@ -67,6 +67,7 @@ namespace {
 using OBS::Output::CanvasReference;
 using OBS::Output::Destination;
 using OBS::Output::FailoverMode;
+using OBS::Output::Kind;
 using OBS::Output::Route;
 using OBS::Output::RouteSet;
 
