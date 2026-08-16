@@ -897,11 +897,14 @@ struct OBSOutputRoutesSettings::Impl {
 		if (!sourceRoute || !destination || !targetRoute || sourceRoute == targetRoute) {
 			return;
 		}
-		Destination moved = std::move(*destination);
-		sourceRoute->destinations.erase(
-			std::remove_if(sourceRoute->destinations.begin(), sourceRoute->destinations.end(),
-				       [&](const Destination &item) { return item.id == ToStdString(destinationId); }),
-			sourceRoute->destinations.end());
+		const std::string id = ToStdString(destinationId);
+		const auto source = std::find_if(sourceRoute->destinations.begin(), sourceRoute->destinations.end(),
+						 [&](const Destination &item) { return item.id == id; });
+		if (source == sourceRoute->destinations.end()) {
+			return;
+		}
+		Destination moved = std::move(*source);
+		sourceRoute->destinations.erase(source);
 		targetRoute->destinations.emplace_back(std::move(moved));
 	}
 
