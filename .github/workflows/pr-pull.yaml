@@ -75,6 +75,10 @@ jobs:
           target: x64
           config: RelWithDebInfo
 
+      - name: Test platform session lifecycle 🧪
+        shell: pwsh
+        run: ctest --test-dir build_x64 -C RelWithDebInfo -R '^obs-pro-platform-session-' --output-on-failure
+
       - name: Save Windows dependency cache ⚡
         if: success() && steps.windows-deps-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5

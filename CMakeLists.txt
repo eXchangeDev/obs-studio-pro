@@ -18,6 +18,7 @@ include(helpers)
 option(ENABLE_FRONTEND "Enable building with UI (requires Qt)" ON)
 option(ENABLE_SCRIPTING "Enable scripting support" ON)
 option(ENABLE_HEVC "Enable HEVC encoders" ON)
+option(ENABLE_OBS_PRO_TESTS "Build OBS Studio Pro platform-session tests" OFF)
 
 add_subdirectory(libobs)
 if(OS_WINDOWS)
@@ -33,5 +34,10 @@ add_subdirectory(plugins)
 add_subdirectory(test/test-input)
 
 add_subdirectory(frontend)
+
+if(ENABLE_OBS_PRO_TESTS)
+  enable_testing()
+  add_subdirectory(test/obs-pro)
+endif()
 
 message_configuration()
