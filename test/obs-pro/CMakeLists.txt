@@ -13,9 +13,18 @@ function(add_obs_pro_session_test target source)
   target_include_directories(${target} PRIVATE ../../frontend)
   target_link_libraries(${target} PRIVATE OBS::libobs nlohmann_json::nlohmann_json)
   add_test(NAME ${target} COMMAND ${target})
+
+  set(test_runtime_directory "$<TARGET_FILE_DIR:OBS::libobs>")
+  if(OS_WINDOWS)
+    set(test_runtime_directory "${OBS_OUTPUT_DIR}/$<CONFIG>/${OBS_EXECUTABLE_DESTINATION}")
+  endif()
+
   set_tests_properties(
     ${target}
-    PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:OBS::libobs>"
+    PROPERTIES
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${test_runtime_directory}"
+      WORKING_DIRECTORY "${test_runtime_directory}"
+      TIMEOUT 30
   )
   set_target_properties(${target} PROPERTIES FOLDER "tests and examples")
 endfunction()
