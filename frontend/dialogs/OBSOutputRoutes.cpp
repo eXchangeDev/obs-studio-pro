@@ -58,6 +58,7 @@
 #include <cmath>
 #include <numeric>
 #include <set>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 
@@ -394,9 +395,11 @@ struct OBSOutputRoutesSettings::Impl {
 		QWidget *page = nullptr;
 		QCheckBox *enabled = nullptr;
 		QLineEdit *name = nullptr;
+		QComboBox *session = nullptr;
 		QComboBox *output = nullptr;
 		QComboBox *serviceType = nullptr;
 		QSpinBox *priority = nullptr;
+		QCheckBox *dynamicBitrate = nullptr;
 		QVBoxLayout *propertiesLayout = nullptr;
 		OBSPropertiesView *properties = nullptr;
 	};
@@ -442,6 +445,7 @@ struct OBSOutputRoutesSettings::Impl {
 	bool loading = false;
 
 	RouteSet routes;
+	OBS::Output::SessionSet sessions;
 	std::vector<CanvasDraft> canvasDrafts;
 	std::set<QString> deletedCanvasUuids;
 
@@ -452,6 +456,7 @@ struct OBSOutputRoutesSettings::Impl {
 	QWidget *nativeOutputPage = nullptr;
 	QWidget *nativeVideoPage = nullptr;
 	QComboBox *primaryOutput = nullptr;
+	QComboBox *replayProgram = nullptr;
 
 	std::vector<std::unique_ptr<DestinationUi>> destinationUis;
 	std::vector<std::unique_ptr<RouteUi>> routeUis;
@@ -474,9 +479,36 @@ struct OBSOutputRoutesSettings::Impl {
 		primaryOutput->addItem(QTStr("OBSPro.Settings.Output.Main"));
 		primaryOutput->setEnabled(false);
 		mappingLayout->addRow(QTStr("OBSPro.Settings.Stream.EncodedOutput"), primaryOutput);
+		auto *primaryControls = new QWidget(mapping);
+		auto *primaryControlsLayout = new QHBoxLayout(primaryControls);
+		primaryControlsLayout->setContentsMargins(0, 0, 0, 0);
+		auto *startPrimary = new QPushButton(QTStr("OBSPro.Settings.Session.Start"), primaryControls);
+		auto *stopPrimary = new QPushButton(QTStr("OBSPro.Settings.Session.Stop"), primaryControls);
+		primaryControlsLayout->addWidget(startPrimary);
+		primaryControlsLayout->addWidget(stopPrimary);
+		primaryControlsLayout->addStretch();
+		mappingLayout->addRow(QTStr("OBSPro.Settings.Session.Controls"), primaryControls);
+		QObject::connect(startPrimary, &QPushButton::clicked, mapping,
+				 [this]() { main->StartPlatformSession("stream1"); });
+		QObject::connect(stopPrimary, &QPushButton::clicked, mapping,
+				 [this]() { main->StopPlatformSession("stream1"); });
 		if (auto *layout = qobject_cast<QVBoxLayout *>(nativeStreamPage->layout())) {
 			layout->insertWidget(0, mapping);
 		}
+
+		auto *replayMapping = new QGroupBox(QTStr("OBSPro.Settings.Replay.Program"), nativeOutputPage);
+		auto *replayLayout = new QFormLayout(replayMapping);
+		replayLayout->setContentsMargins(9, 2, 9, 9);
+		replayProgram = new QComboBox(replayMapping);
+		replayLayout->addRow(QTStr("OBSPro.Settings.Replay.Source"), replayProgram);
+		auto *replayDescription = new QLabel(QTStr("OBSPro.Settings.Replay.Description"), replayMapping);
+		replayDescription->setWordWrap(true);
+		replayLayout->addRow(QString(), replayDescription);
+		if (auto *layout = qobject_cast<QVBoxLayout *>(nativeOutputPage->layout())) {
+			layout->insertWidget(0, replayMapping);
+		}
+		QObject::connect(replayProgram, &QComboBox::currentIndexChanged, nativeOutputPage,
+				 [this](int) { MarkChanged(); });
 
 		QToolButton *addDestination =
 			AddCornerButton(destinationTabs, QTStr("OBSPro.Settings.Stream.AddDestination"));
@@ -519,6 +551,13 @@ struct OBSOutputRoutesSettings::Impl {
 		auto found = std::find_if(routes.routes.begin(), routes.routes.end(),
 					  [&](const Route &route) { return route.id == ToStdString(id); });
 		return found == routes.routes.end() ? nullptr : &*found;
+	}
+
+	OBS::Output::PlatformSessionConfig *FindSession(const std::string &id)
+	{
+		const auto found = std::find_if(sessions.sessions.begin(), sessions.sessions.end(),
+						[&](const auto &session) { return session.id == id; });
+		return found == sessions.sessions.end() ? nullptr : &*found;
 	}
 
 	Route *PrimaryRoute()
@@ -615,11 +654,11 @@ struct OBSOutputRoutesSettings::Impl {
 	void LoadRoutes()
 	{
 		routes = {};
+		sessions = {};
 		const char *serializedSessions = config_get_string(main->Config(), "Stream1", "PlatformSessions");
 		const char *serializedRoutes = config_get_string(main->Config(), "Stream1", "OutputRoutes");
 		bool loaded = false;
 		if (serializedSessions && *serializedSessions) {
-			OBS::Output::SessionSet sessions;
 			std::string error;
 			if (OBS::Output::Deserialize(serializedSessions, sessions, error)) {
 				routes = OBS::Output::ToRouteSet(sessions);
@@ -637,9 +676,32 @@ struct OBSOutputRoutesSettings::Impl {
 						     QTStr("OBSPro.OutputRoutes.InvalidConfigurationText")
 							     .arg(QString::fromUtf8(error.c_str())));
 				routes = {};
+			} else {
+				sessions = OBS::Output::MigrateRouteSet(routes);
 			}
 		}
 		EnsurePrimaryRoute();
+		sessions = OBS::Output::ReconcileRouteSet(sessions, routes);
+		routes = OBS::Output::ToRouteSet(sessions);
+		EnsurePrimaryRoute();
+	}
+
+	void PopulateReplayProgramCombo(bool usePersistedSelection = false)
+	{
+		QSignalBlocker blocker(replayProgram);
+		const QString selected = !usePersistedSelection && replayProgram->count() > 0
+						 ? replayProgram->currentData().toString()
+						 : QString::fromUtf8(sessions.replayBuffer.programId.c_str());
+		replayProgram->clear();
+		replayProgram->addItem(QTStr("OBSPro.Settings.Replay.Legacy"), QString());
+		for (const Route &route : routes.routes) {
+			if (route.enabled && route.kind == Kind::Stream) {
+				replayProgram->addItem(QString::fromUtf8(route.name.c_str()),
+						       QString::fromUtf8(route.id.c_str()));
+			}
+		}
+		const int index = replayProgram->findData(selected);
+		replayProgram->setCurrentIndex(index >= 0 ? index : 0);
 	}
 
 	void LoadCanvases()
@@ -738,6 +800,33 @@ struct OBSOutputRoutesSettings::Impl {
 		combo->setCurrentIndex(std::max(0, selectedIndex));
 	}
 
+	void PopulateSessionCombo(QComboBox *combo, const Destination &destination, std::string_view programId)
+	{
+		QSignalBlocker blocker(combo);
+		combo->clear();
+		const QString independentId =
+			QStringLiteral("session-%1").arg(QString::fromUtf8(destination.id.c_str()));
+		combo->addItem(QTStr("OBSPro.Settings.Session.Independent"), independentId);
+		for (const auto &session : sessions.sessions) {
+			const bool boundToProgram =
+				std::any_of(session.programBindings.begin(), session.programBindings.end(),
+					    [&](const auto &binding) { return binding.programId == programId; });
+			if (session.compatibilityDefault || session.id == ToStdString(independentId) ||
+			    !boundToProgram) {
+				continue;
+			}
+			combo->addItem(QString::fromUtf8(session.name.c_str()), QString::fromUtf8(session.id.c_str()));
+		}
+
+		const QString selected = QString::fromUtf8(destination.sessionId.c_str());
+		int index = combo->findData(selected);
+		if (index < 0 && !selected.isEmpty()) {
+			combo->addItem(QString::fromUtf8(destination.name.c_str()), selected);
+			index = combo->count() - 1;
+		}
+		combo->setCurrentIndex(std::max(0, index));
+	}
+
 	void SyncDestinationUi(DestinationUi &ui)
 	{
 		auto [route, destination] = FindDestination(ui.id);
@@ -746,7 +835,12 @@ struct OBSOutputRoutesSettings::Impl {
 		}
 		destination->enabled = ui.enabled->isChecked();
 		destination->name = ToStdString(ui.name->text().trimmed());
+		destination->sessionId = ToStdString(ui.session->currentData().toString());
 		destination->priority = static_cast<uint32_t>(ui.priority->value());
+		destination->dynamicBitrateEnabled = ui.dynamicBitrate->isChecked();
+		if (auto *session = FindSession(destination->sessionId)) {
+			session->dynamicBitrateEnabled = destination->dynamicBitrateEnabled;
+		}
 		destination->service = ToStdString(ui.serviceType->currentData().toString());
 		if (ui.properties) {
 			obs_data_t *settings = ui.properties->GetSettings();
@@ -832,6 +926,10 @@ struct OBSOutputRoutesSettings::Impl {
 				AddNativeSettingsRow(form, settings, QString(), ui->enabled);
 				ui->name = new QLineEdit(QString::fromUtf8(destination.name.c_str()), settings);
 				AddNativeSettingsRow(form, settings, QTStr("OBSPro.OutputRoutes.Name"), ui->name);
+				ui->session = new QComboBox(settings);
+				PopulateSessionCombo(ui->session, destination, route.id);
+				AddNativeSettingsRow(form, settings, QTStr("OBSPro.Settings.Session.PlatformSession"),
+						     ui->session);
 				ui->output = new QComboBox(settings);
 				PopulateOutputCombo(ui->output, QString::fromUtf8(route.id.c_str()));
 				AddNativeSettingsRow(form, settings, QTStr("OBSPro.Settings.Stream.EncodedOutput"),
@@ -845,6 +943,12 @@ struct OBSOutputRoutesSettings::Impl {
 				ui->priority->setValue(static_cast<int>(destination.priority));
 				AddNativeSettingsRow(form, settings, QTStr("OBSPro.OutputRoutes.Priority"),
 						     ui->priority);
+				ui->dynamicBitrate =
+					new QCheckBox(QTStr("Basic.Settings.Output.DynamicBitrate"), settings);
+				const auto *session = FindSession(destination.sessionId);
+				ui->dynamicBitrate->setChecked(session ? session->dynamicBitrateEnabled
+								       : destination.dynamicBitrateEnabled);
+				AddNativeSettingsRow(form, settings, QString(), ui->dynamicBitrate);
 
 				auto *properties =
 					new QGroupBox(QTStr("OBSPro.Settings.Stream.ServiceSettings"), contents);
@@ -852,9 +956,18 @@ struct OBSOutputRoutesSettings::Impl {
 				ui->propertiesLayout->setContentsMargins(9, 2, 9, 9);
 				layout->addWidget(properties);
 				layout->addStretch();
-				auto *remove =
-					new QPushButton(QTStr("OBSPro.Settings.Stream.RemoveDestination"), contents);
-				layout->addWidget(remove, 0, Qt::AlignRight);
+				auto *sessionControls = new QWidget(contents);
+				auto *sessionControlsLayout = new QHBoxLayout(sessionControls);
+				sessionControlsLayout->setContentsMargins(0, 0, 0, 0);
+				auto *start = new QPushButton(QTStr("OBSPro.Settings.Session.Start"), sessionControls);
+				auto *stop = new QPushButton(QTStr("OBSPro.Settings.Session.Stop"), sessionControls);
+				auto *remove = new QPushButton(QTStr("OBSPro.Settings.Stream.RemoveDestination"),
+							       sessionControls);
+				sessionControlsLayout->addWidget(start);
+				sessionControlsLayout->addWidget(stop);
+				sessionControlsLayout->addStretch();
+				sessionControlsLayout->addWidget(remove);
+				layout->addWidget(sessionControls);
 
 				DestinationUi *raw = ui.get();
 				QObject::connect(ui->enabled, &QCheckBox::toggled, ui->page,
@@ -872,13 +985,49 @@ struct OBSOutputRoutesSettings::Impl {
 						 });
 				QObject::connect(ui->priority, &QSpinBox::valueChanged, ui->page,
 						 [this](int) { MarkChanged(); });
-				QObject::connect(
-					ui->output, &QComboBox::currentIndexChanged, ui->page, [this, raw](int) {
-						SyncDestinationUi(*raw);
-						MoveDestination(raw->id, raw->output->currentData().toString());
-						RefreshAssignedDestinationLabels();
-						MarkChanged();
-					});
+				QObject::connect(ui->session, &QComboBox::currentIndexChanged, ui->page,
+						 [this, raw](int) {
+							 const auto *selected = FindSession(
+								 ToStdString(raw->session->currentData().toString()));
+							 if (selected) {
+								 const QSignalBlocker blocker(raw->dynamicBitrate);
+								 raw->dynamicBitrate->setChecked(
+									 selected->dynamicBitrateEnabled);
+							 }
+							 SyncDestinationUi(*raw);
+							 MarkChanged();
+						 });
+				QObject::connect(ui->dynamicBitrate, &QCheckBox::toggled, ui->page,
+						 [this](bool) { MarkChanged(); });
+				QObject::connect(ui->output, &QComboBox::currentIndexChanged, ui->page, [this, raw](int) {
+					SyncDestinationUi(*raw);
+					const QString targetProgram = raw->output->currentData().toString();
+					auto [currentRoute, current] = FindDestination(raw->id);
+					if (currentRoute && current && currentRoute->id != ToStdString(targetProgram)) {
+						const bool sharesSession = std::any_of(
+							routes.routes.begin(), routes.routes.end(),
+							[&](const Route &route) {
+								return std::any_of(
+									route.destinations.begin(),
+									route.destinations.end(),
+									[&](const Destination &destination) {
+										return destination.id != current->id &&
+										       destination.sessionId ==
+											       current->sessionId;
+									});
+							});
+						if (sharesSession) {
+							current->sessionId = "session-" + current->id;
+						}
+					}
+					MoveDestination(raw->id, targetProgram);
+					auto [newRoute, moved] = FindDestination(raw->id);
+					if (newRoute && moved) {
+						PopulateSessionCombo(raw->session, *moved, newRoute->id);
+					}
+					RefreshAssignedDestinationLabels();
+					MarkChanged();
+				});
 				QObject::connect(ui->serviceType, &QComboBox::currentIndexChanged, ui->page,
 						 [this, raw](int) {
 							 auto [currentRoute, current] = FindDestination(raw->id);
@@ -895,6 +1044,12 @@ struct OBSOutputRoutesSettings::Impl {
 						 });
 				QObject::connect(remove, &QPushButton::clicked, ui->page,
 						 [this, id = ui->id]() { RemoveDestination(id); });
+				QObject::connect(start, &QPushButton::clicked, ui->page, [this, raw]() {
+					main->StartPlatformSession(ToStdString(raw->session->currentData().toString()));
+				});
+				QObject::connect(stop, &QPushButton::clicked, ui->page, [this, raw]() {
+					main->StopPlatformSession(ToStdString(raw->session->currentData().toString()));
+				});
 
 				destinationTabs->addTab(ui->page, QString::fromUtf8(destination.name.c_str()));
 				destinationUis.emplace_back(std::move(ui));
@@ -927,6 +1082,7 @@ struct OBSOutputRoutesSettings::Impl {
 			name = QStringLiteral("%1 %2").arg(baseName).arg(suffix++);
 		}
 		destination.name = ToStdString(name);
+		destination.sessionId = "session-" + destination.id;
 		destination.service = "rtmp_common";
 		destination.priority = static_cast<uint32_t>(destinationUis.size());
 		primary->destinations.emplace_back(std::move(destination));
@@ -1016,6 +1172,7 @@ struct OBSOutputRoutesSettings::Impl {
 				PopulateOutputCombo(ui->output, QString::fromUtf8(route->id.c_str()));
 			}
 		}
+		PopulateReplayProgramCombo();
 	}
 
 	void RefreshAssignedDestinationLabels()
@@ -1204,6 +1361,9 @@ struct OBSOutputRoutesSettings::Impl {
 		routes.routes.erase(std::remove_if(routes.routes.begin(), routes.routes.end(),
 						   [&](const Route &item) { return item.id == ToStdString(id); }),
 				    routes.routes.end());
+		if (sessions.replayBuffer.programId == ToStdString(id)) {
+			sessions.replayBuffer.programId.clear();
+		}
 		BuildOutputTabs();
 		MarkChanged();
 	}
@@ -1732,7 +1892,9 @@ struct OBSOutputRoutesSettings::Impl {
 		}
 		const std::string serialized = OBS::Output::Serialize(routes);
 		config_set_string(main->Config(), "Stream1", "OutputRoutes", serialized.c_str());
-		const std::string serializedSessions = OBS::Output::Serialize(OBS::Output::MigrateRouteSet(routes));
+		sessions.replayBuffer.programId = ToStdString(replayProgram->currentData().toString());
+		sessions = OBS::Output::ReconcileRouteSet(sessions, routes);
+		const std::string serializedSessions = OBS::Output::Serialize(sessions);
 		config_set_string(main->Config(), "Stream1", "PlatformSessions", serializedSessions.c_str());
 		Load();
 		return true;
@@ -1746,6 +1908,7 @@ struct OBSOutputRoutesSettings::Impl {
 		BuildDestinationTabs();
 		BuildOutputTabs();
 		BuildCanvasTabs();
+		PopulateReplayProgramCombo(true);
 		loading = false;
 	}
 };
