@@ -294,7 +294,6 @@ SessionSet MigrateRouteSet(const RouteSet &routes)
 		program.audioEncoderId = route.audioEncoderId;
 		program.videoEncoderSettingsJson = route.videoEncoderSettingsJson;
 		program.audioEncoderSettingsJson = route.audioEncoderSettingsJson;
-		program.videoBitrateOverride = route.videoBitrateOverride;
 		program.audioMix = route.audioMix;
 		program.enabled = route.enabled;
 		program.compatibilityDefault = route.primary;
@@ -359,7 +358,6 @@ RouteSet ToRouteSet(const SessionSet &set)
 		route.audioEncoderId = program.audioEncoderId;
 		route.videoEncoderSettingsJson = program.videoEncoderSettingsJson;
 		route.audioEncoderSettingsJson = program.audioEncoderSettingsJson;
-		route.videoBitrateOverride = program.videoBitrateOverride;
 		route.audioMix = program.audioMix;
 		route.enabled = program.enabled;
 		route.primary = program.compatibilityDefault;
@@ -428,7 +426,6 @@ void to_json(json &value, const Program &program)
 		     {"audio_encoder_id", program.audioEncoderId},
 		     {"video_encoder_settings", program.videoEncoderSettingsJson},
 		     {"audio_encoder_settings", program.audioEncoderSettingsJson},
-		     {"video_bitrate_override", program.videoBitrateOverride},
 		     {"audio_mix", program.audioMix},
 		     {"enabled", program.enabled},
 		     {"compatibility_default", program.compatibilityDefault},
@@ -454,7 +451,6 @@ void from_json(const json &value, Program &program)
 	program.audioEncoderId = value.value("audio_encoder_id", std::string{});
 	program.videoEncoderSettingsJson = value.value("video_encoder_settings", std::string{});
 	program.audioEncoderSettingsJson = value.value("audio_encoder_settings", std::string{});
-	program.videoBitrateOverride = value.value("video_bitrate_override", 0U);
 	program.audioMix = value.value("audio_mix", 0U);
 	program.enabled = value.value("enabled", true);
 	program.compatibilityDefault = value.value("compatibility_default", false);

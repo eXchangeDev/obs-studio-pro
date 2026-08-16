@@ -2,6 +2,7 @@
 #include "AdvancedOutput.hpp"
 #include "SimpleOutput.hpp"
 
+#include <utility/GoLiveAPI_Network.hpp>
 #include <utility/MultitrackVideoError.hpp>
 #include <utility/StartMultiTrackVideoStreamingGuard.hpp>
 #include <utility/VCamConfig.hpp>

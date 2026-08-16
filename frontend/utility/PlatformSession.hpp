@@ -72,7 +72,6 @@ struct Program {
 	std::string audioEncoderId;
 	std::string videoEncoderSettingsJson;
 	std::string audioEncoderSettingsJson;
-	uint32_t videoBitrateOverride = 0;
 	uint32_t audioMix = 0;
 	bool enabled = true;
 	bool compatibilityDefault = false;
