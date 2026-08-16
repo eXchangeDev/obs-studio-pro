@@ -83,8 +83,14 @@ OBSEncoderAutoRelease CreateVideoEncoder(const Route &route, obs_canvas_t *canva
 		return obs_encoder_get_ref(reference);
 	}
 
-	OBSDataAutoRelease settings = sameEncoder ? obs_encoder_get_settings(reference)
-						  : obs_encoder_defaults(encoderId);
+	OBSDataAutoRelease settings;
+	if (sameEncoder) {
+		OBSDataAutoRelease referenceSettings = obs_encoder_get_settings(reference);
+		settings = obs_data_create();
+		obs_data_apply(settings, referenceSettings);
+	} else {
+		settings = obs_encoder_defaults(encoderId);
+	}
 	ApplyJsonSettings(settings, route.videoEncoderSettingsJson);
 	const std::string name = ContextName("video", route);
 	OBSEncoderAutoRelease encoder = obs_video_encoder_create(encoderId, name.c_str(), settings, nullptr);
@@ -117,8 +123,14 @@ OBSEncoderAutoRelease CreateAudioEncoder(const Route &route, obs_encoder_t *refe
 		return obs_encoder_get_ref(reference);
 	}
 
-	OBSDataAutoRelease settings = sameEncoder ? obs_encoder_get_settings(reference)
-						  : obs_encoder_defaults(encoderId);
+	OBSDataAutoRelease settings;
+	if (sameEncoder) {
+		OBSDataAutoRelease referenceSettings = obs_encoder_get_settings(reference);
+		settings = obs_data_create();
+		obs_data_apply(settings, referenceSettings);
+	} else {
+		settings = obs_encoder_defaults(encoderId);
+	}
 	ApplyJsonSettings(settings, route.audioEncoderSettingsJson);
 	const std::string name = ContextName("audio", route);
 	OBSEncoderAutoRelease encoder =
