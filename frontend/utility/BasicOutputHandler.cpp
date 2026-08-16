@@ -250,17 +250,37 @@ BasicOutputHandler::BasicOutputHandler(OBSBasic *main_) : main(main_)
 
 bool BasicOutputHandler::PrepareOutputRoutes(obs_output_t *referenceOutput)
 {
-	const char *serialized = config_get_string(main->Config(), "Stream1", "OutputRoutes");
-	if (!serialized || !*serialized) {
-		outputRoutes.Clear();
-		return true;
-	}
-
+	platformSessions = {};
+	const char *serializedSessions = config_get_string(main->Config(), "Stream1", "PlatformSessions");
+	const char *serializedRoutes = config_get_string(main->Config(), "Stream1", "OutputRoutes");
 	OBS::Output::RouteSet routes;
 	std::string error;
-	if (!OBS::Output::Deserialize(serialized, routes, error)) {
-		blog(LOG_WARNING, "OBS Studio Pro: failed to parse additional output routes: %s", error.c_str());
-		return false;
+
+	if (serializedSessions && *serializedSessions) {
+		if (!OBS::Output::Deserialize(serializedSessions, platformSessions, error)) {
+			blog(LOG_WARNING, "OBS Studio Pro: failed to parse platform sessions: %s", error.c_str());
+			platformSessions = {};
+		} else {
+			routes = OBS::Output::ToRouteSet(platformSessions);
+		}
+	}
+
+	if (routes.routes.empty() && serializedRoutes && *serializedRoutes) {
+		if (!OBS::Output::Deserialize(serializedRoutes, routes, error)) {
+			blog(LOG_WARNING, "OBS Studio Pro: failed to parse additional output routes: %s",
+			     error.c_str());
+			return false;
+		}
+		// Keep the in-memory session model authoritative after a legacy profile
+		// is loaded. Settings saving writes both projections until all callers
+		// have moved to the session model.
+		platformSessions = OBS::Output::MigrateRouteSet(routes);
+		routes = OBS::Output::ToRouteSet(platformSessions);
+	}
+
+	if (routes.routes.empty()) {
+		outputRoutes.Clear();
+		return true;
 	}
 
 	OBS::Output::RuntimeOptions options;
@@ -307,9 +327,24 @@ size_t BasicOutputHandler::StartOutputRoutes()
 	return started;
 }
 
+size_t BasicOutputHandler::StartOutputSession(std::string_view sessionId)
+{
+	return outputRoutes.StartSession(sessionId);
+}
+
 void BasicOutputHandler::StopOutputRoutes(bool force)
 {
 	outputRoutes.Stop(force);
+}
+
+void BasicOutputHandler::StopOutputSession(std::string_view sessionId, bool force)
+{
+	outputRoutes.StopSession(sessionId, force);
+}
+
+std::vector<OBS::Output::SessionSnapshot> BasicOutputHandler::OutputSessionSnapshots() const
+{
+	return outputRoutes.SessionSnapshots();
 }
 
 extern void log_vcam_changed(const VCamConfig &config, bool starting);
@@ -537,10 +572,17 @@ std::shared_future<void> BasicOutputHandler::SetupMultitrackVideo(obs_service_t 
 
 	bool is_custom = strncmp("rtmp_custom", obs_service_get_type(service), 11) == 0;
 
-	std::optional<std::string> custom_config = std::nullopt;
+	OBS::Output::MultitrackConfigProvider config_provider;
 	if (config_get_bool(main->Config(), "Stream1", "MultitrackVideoConfigOverrideEnabled")) {
-		custom_config = DeserializeConfigText(
+		config_provider.source = OBS::Output::MultitrackConfigSource::CustomJson;
+		config_provider.value = DeserializeConfigText(
 			config_get_string(main->Config(), "Stream1", "MultitrackVideoConfigOverride"));
+	} else {
+		const QString autoConfigUrl = MultitrackVideoAutoConfigURL(service);
+		if (!autoConfigUrl.isEmpty()) {
+			config_provider.source = OBS::Output::MultitrackConfigSource::RemoteProviderUrl;
+			config_provider.value = autoConfigUrl.toStdString();
+		}
 	}
 
 	std::optional<QString> extraCanvasUUID;
@@ -624,9 +666,9 @@ std::shared_future<void> BasicOutputHandler::SetupMultitrackVideo(obs_service_t 
 		try {
 			multitrackVideo->PrepareStreaming(main, service_name.c_str(), service, custom_rtmp_url, key,
 							  audio_encoder_id.c_str(), maximum_aggregate_bitrate,
-							  maximum_video_tracks, custom_config, stream_dump_config,
-							  main_audio_mixer, vod_track_mixer, use_rtmps,
-							  extraCanvasUUID);
+							  maximum_video_tracks, std::move(config_provider),
+							  stream_dump_config, main_audio_mixer, vod_track_mixer,
+							  use_rtmps, extraCanvasUUID);
 		} catch (const MultitrackVideoError &error_) {
 			error.emplace(error_);
 		}

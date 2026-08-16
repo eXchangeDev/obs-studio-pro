@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <obs.h>
@@ -47,6 +48,7 @@ enum class RuntimeState {
 
 struct DestinationSnapshot {
 	std::string routeId;
+	std::string sessionId;
 	std::string destinationId;
 	std::string name;
 	RuntimeState state = RuntimeState::Idle;
@@ -54,6 +56,13 @@ struct DestinationSnapshot {
 	uint64_t totalBytes = 0;
 	int droppedFrames = 0;
 	int totalFrames = 0;
+};
+
+struct SessionSnapshot {
+	std::string sessionId;
+	RuntimeState state = RuntimeState::Idle;
+	std::string lastError;
+	size_t endpointCount = 0;
 };
 
 // Manages the additional destinations attached to OBS' regular stream output.
@@ -71,12 +80,15 @@ public:
 	bool Prepare(const RouteSet &routes, obs_output_t *referenceOutput, const RuntimeOptions &options,
 		     std::string &error);
 	size_t Start();
+	size_t StartSession(std::string_view sessionId);
 	void Stop(bool force = false);
+	void StopSession(std::string_view sessionId, bool force = false);
 	void Clear();
 
 	bool Active() const;
 	size_t PreparedDestinationCount() const;
 	std::vector<DestinationSnapshot> Snapshot() const;
+	std::vector<SessionSnapshot> SessionSnapshots() const;
 
 private:
 	struct Impl;

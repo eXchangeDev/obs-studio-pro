@@ -17,6 +17,7 @@
 
 #include "OBSOutputRoutes.hpp"
 
+#include <utility/PlatformSession.hpp>
 #include <utility/OutputRoute.hpp>
 #include <widgets/OBSBasic.hpp>
 
@@ -614,10 +615,24 @@ struct OBSOutputRoutesSettings::Impl {
 	void LoadRoutes()
 	{
 		routes = {};
-		const char *serialized = config_get_string(main->Config(), "Stream1", "OutputRoutes");
-		if (serialized && *serialized) {
+		const char *serializedSessions = config_get_string(main->Config(), "Stream1", "PlatformSessions");
+		const char *serializedRoutes = config_get_string(main->Config(), "Stream1", "OutputRoutes");
+		bool loaded = false;
+		if (serializedSessions && *serializedSessions) {
+			OBS::Output::SessionSet sessions;
 			std::string error;
-			if (!OBS::Output::Deserialize(serialized, routes, error)) {
+			if (OBS::Output::Deserialize(serializedSessions, sessions, error)) {
+				routes = OBS::Output::ToRouteSet(sessions);
+				loaded = true;
+			} else {
+				QMessageBox::warning(destinationTabs, QTStr("OBSPro.OutputRoutes.InvalidConfiguration"),
+						     QTStr("OBSPro.OutputRoutes.InvalidConfigurationText")
+							     .arg(QString::fromUtf8(error.c_str())));
+			}
+		}
+		if (!loaded && serializedRoutes && *serializedRoutes) {
+			std::string error;
+			if (!OBS::Output::Deserialize(serializedRoutes, routes, error)) {
 				QMessageBox::warning(destinationTabs, QTStr("OBSPro.OutputRoutes.InvalidConfiguration"),
 						     QTStr("OBSPro.OutputRoutes.InvalidConfigurationText")
 							     .arg(QString::fromUtf8(error.c_str())));
@@ -1717,6 +1732,8 @@ struct OBSOutputRoutesSettings::Impl {
 		}
 		const std::string serialized = OBS::Output::Serialize(routes);
 		config_set_string(main->Config(), "Stream1", "OutputRoutes", serialized.c_str());
+		const std::string serializedSessions = OBS::Output::Serialize(OBS::Output::MigrateRouteSet(routes));
+		config_set_string(main->Config(), "Stream1", "PlatformSessions", serializedSessions.c_str());
 		Load();
 		return true;
 	}

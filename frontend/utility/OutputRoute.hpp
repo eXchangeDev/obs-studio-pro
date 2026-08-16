@@ -50,6 +50,9 @@ struct CanvasReference {
 struct Destination {
 	std::string id;
 	std::string name;
+	// A destination remains a transport endpoint for compatibility, while
+	// this stable ID identifies the owning PlatformSession in the new model.
+	std::string sessionId;
 
 	// Destinations are resolved through OBS' existing service/output layer. A
 	// relay or external failover service is intentionally just another
@@ -70,6 +73,9 @@ struct Destination {
 	std::string serviceSettingsJson;
 
 	uint32_t priority = 0;
+	uint32_t reconnectRetryCount = 0;
+	uint32_t reconnectRetrySeconds = 0;
+	bool reconnectEnabled = true;
 	bool useAuthentication = false;
 	bool enabled = true;
 };

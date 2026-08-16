@@ -158,7 +158,7 @@ std::vector<std::string> Validate(const Destination &destination)
 	if (destination.service.empty()) {
 		errors.emplace_back("destination service is empty");
 	}
-	if (destination.server.empty()) {
+	if (destination.server.empty() && destination.serviceSettingsJson.empty()) {
 		errors.emplace_back("destination server is empty");
 	}
 
@@ -235,6 +235,7 @@ void to_json(json &value, const Destination &destination)
 {
 	value = json{{"id", destination.id},
 		     {"name", destination.name},
+		     {"session_id", destination.sessionId},
 		     {"service", destination.service},
 		     {"service_name", destination.serviceName},
 		     {"server", destination.server},
@@ -243,6 +244,9 @@ void to_json(json &value, const Destination &destination)
 		     {"password", destination.password},
 		     {"service_settings", destination.serviceSettingsJson},
 		     {"priority", destination.priority},
+		     {"reconnect_retry_count", destination.reconnectRetryCount},
+		     {"reconnect_retry_seconds", destination.reconnectRetrySeconds},
+		     {"reconnect_enabled", destination.reconnectEnabled},
 		     {"use_authentication", destination.useAuthentication},
 		     {"enabled", destination.enabled}};
 }
@@ -251,6 +255,7 @@ void from_json(const json &value, Destination &destination)
 {
 	destination.id = value.value("id", std::string{});
 	destination.name = value.value("name", std::string{});
+	destination.sessionId = value.value("session_id", std::string{});
 	destination.service = value.value("service", std::string{"rtmp_custom"});
 	destination.serviceName = value.value("service_name", std::string{});
 	destination.server = value.value("server", std::string{});
@@ -259,6 +264,9 @@ void from_json(const json &value, Destination &destination)
 	destination.password = value.value("password", std::string{});
 	destination.serviceSettingsJson = value.value("service_settings", std::string{});
 	destination.priority = value.value("priority", 0U);
+	destination.reconnectRetryCount = value.value("reconnect_retry_count", 0U);
+	destination.reconnectRetrySeconds = value.value("reconnect_retry_seconds", 0U);
+	destination.reconnectEnabled = value.value("reconnect_enabled", true);
 	destination.useAuthentication = value.value("use_authentication", false);
 	destination.enabled = value.value("enabled", true);
 }

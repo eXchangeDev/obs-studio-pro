@@ -1,6 +1,7 @@
 #pragma once
 
 #include <utility/MultitrackVideoOutput.hpp>
+#include <utility/PlatformSession.hpp>
 #include <utility/OutputRouteRuntime.hpp>
 #include <utility/WHIPSimulcastEncoders.hpp>
 
@@ -9,6 +10,7 @@
 
 #include <functional>
 #include <future>
+#include <string_view>
 
 #define RTMP_PROTOCOL "rtmp"
 #define SRT_PROTOCOL "srt"
@@ -47,6 +49,7 @@ struct BasicOutputHandler {
 
 	std::unique_ptr<WHIPSimulcastEncoders> whipSimulcastEncoders;
 	OBS::Output::Runtime outputRoutes;
+	OBS::Output::SessionSet platformSessions;
 
 	std::string outputType;
 	std::string lastError;
@@ -93,7 +96,10 @@ struct BasicOutputHandler {
 
 	bool PrepareOutputRoutes(obs_output_t *referenceOutput);
 	size_t StartOutputRoutes();
+	size_t StartOutputSession(std::string_view sessionId);
 	void StopOutputRoutes(bool force = false);
+	void StopOutputSession(std::string_view sessionId, bool force = false);
+	std::vector<OBS::Output::SessionSnapshot> OutputSessionSnapshots() const;
 
 	virtual void UpdateVirtualCamOutputSource();
 	virtual void DestroyVirtualCamView();

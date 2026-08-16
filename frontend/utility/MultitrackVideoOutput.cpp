@@ -18,7 +18,6 @@
 
 #include <algorithm>
 #include <cinttypes>
-#include <string_view>
 
 // Codec profile strings
 static const char *h264_main = "Main";
@@ -27,8 +26,6 @@ static const char *h264_cb = "Constrained Baseline";
 static const char *hevc_main = "Main";
 static const char *hevc_main10 = "Main 10";
 static const char *av1_main = "Main";
-
-constexpr std::string_view kCustomRtmpIdentifier{"rtmp_custom"};
 
 // Maximum reconnect attempts with an invalid key error before giving up (roughly 30 seconds with default start value)
 static constexpr uint8_t MAX_RECONNECT_ATTEMPTS = 5;
@@ -347,7 +344,7 @@ static void SetupSignalHandlers(bool recording, MultitrackVideoOutput *self, obs
 void MultitrackVideoOutput::PrepareStreaming(
 	QWidget *parent, const char *service_name, obs_service_t *service, const std::optional<std::string> &rtmp_url,
 	const QString &stream_key, const char *audio_encoder_id, std::optional<uint32_t> maximum_aggregate_bitrate,
-	std::optional<uint32_t> maximum_video_tracks, std::optional<std::string> custom_config,
+	std::optional<uint32_t> maximum_video_tracks, OBS::Output::MultitrackConfigProvider config_provider,
 	obs_data_t *dump_stream_to_file_config, size_t main_audio_mixer, std::optional<size_t> vod_track_mixer,
 	std::optional<bool> use_rtmps, std::optional<QString> extra_canvas)
 {
@@ -364,8 +361,9 @@ void MultitrackVideoOutput::PrepareStreaming(
 
 	std::optional<GoLiveApi::Config> go_live_config;
 	std::optional<GoLiveApi::Config> custom;
-	bool is_custom_config = custom_config.has_value();
-	auto auto_config_url = MultitrackVideoAutoConfigURL(service);
+	const bool is_custom_config = config_provider.IsJson();
+	const QString auto_config_url = config_provider.IsRemote() ? QString::fromStdString(config_provider.value)
+								   : QString{};
 
 	OBSDataAutoRelease service_settings = obs_service_get_settings(service);
 	auto multitrack_video_name = QTStr("Basic.Settings.Stream.MultitrackVideoLabel");
@@ -401,7 +399,7 @@ void MultitrackVideoOutput::PrepareStreaming(
 	}
 
 	blog(LOG_INFO,
-	     "Preparing enhanced broadcasting stream for:\n"
+	     "Preparing multitrack stream for:\n"
 	     "    custom config:  %s\n"
 	     "    config url:     %s\n"
 	     "  settings:\n"
@@ -418,44 +416,26 @@ void MultitrackVideoOutput::PrepareStreaming(
 	     rtmp_url.has_value() ? rtmp_url->c_str() : "",
 	     vod_track_info_storage->array ? vod_track_info_storage->array : "No", canvasNames.c_str());
 
-	// This will crash if serviceId is a nullptr. Deliberately unhandled because that would constitute a critical
-	// application state error.
-	const char *serviceId = obs_service_get_id(service);
-	std::string_view serviceIdString{serviceId};
-
-	bool isCustomRtmpService = (serviceIdString == kCustomRtmpIdentifier);
 	bool hasAutoConfigUrl = !auto_config_url.isEmpty();
-	bool hasCustomConfig = custom_config.has_value();
+	if (config_provider.IsRemote() && hasAutoConfigUrl) {
+		auto go_live_post = constructGoLivePost(stream_key, maximum_aggregate_bitrate, maximum_video_tracks,
+							vod_track_mixer.has_value(), canvases);
 
-	if (!isCustomRtmpService) {
-		if (hasAutoConfigUrl) {
-			auto go_live_post = constructGoLivePost(stream_key, maximum_aggregate_bitrate,
-								maximum_video_tracks, vod_track_mixer.has_value(),
-								canvases);
+		go_live_config = DownloadGoLiveConfig(parent, auto_config_url, go_live_post, multitrack_video_name);
 
-			go_live_config =
-				DownloadGoLiveConfig(parent, auto_config_url, go_live_post, multitrack_video_name);
-
-			if (go_live_config) {
-				blog(LOG_INFO, "Enhanced broadcasting config_id: '%s'",
-				     go_live_config->meta.config_id.c_str());
-			}
+		if (go_live_config) {
+			blog(LOG_INFO, "Multitrack provider config_id: '%s'", go_live_config->meta.config_id.c_str());
 		}
-	} else {
-		if (hasCustomConfig) {
-			GoLiveApi::Config parsed_custom;
-			try {
-				parsed_custom = nlohmann::json::parse(*custom_config);
-			} catch (const nlohmann::json::exception &exception) {
-				blog(LOG_WARNING, "Failed to parse custom config: %s", exception.what());
-				throw MultitrackVideoError::critical(QTStr("FailedToStartStream.InvalidCustomConfig"));
-			}
-
-			nlohmann::json custom_data = parsed_custom;
-			blog(LOG_INFO, "Using custom go live config: %s", custom_data.dump(4).c_str());
-
-			custom.emplace(std::move(parsed_custom));
+	} else if (config_provider.IsJson() && !config_provider.value.empty()) {
+		GoLiveApi::Config parsed_custom;
+		try {
+			parsed_custom = nlohmann::json::parse(config_provider.value);
+		} catch (const nlohmann::json::exception &exception) {
+			blog(LOG_WARNING, "Failed to parse multitrack JSON configuration: %s", exception.what());
+			throw MultitrackVideoError::critical(QTStr("FailedToStartStream.InvalidCustomConfig"));
 		}
+
+		custom.emplace(std::move(parsed_custom));
 	}
 
 	if (!(go_live_config || custom)) {

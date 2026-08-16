@@ -21,6 +21,7 @@
 #include <atomic>
 #include <cstring>
 #include <mutex>
+#include <unordered_map>
 #include <utility>
 
 #include <obs.hpp>
@@ -174,6 +175,7 @@ struct Runtime::Impl {
 		OBSSignal startSignal;
 		OBSSignal stopSignal;
 		std::atomic<RuntimeState> state{RuntimeState::Idle};
+		std::atomic_bool intentionalStop{false};
 		std::string lastError;
 	};
 
@@ -207,7 +209,7 @@ struct Runtime::Impl {
 			destination->lastError = lastError ? lastError : "";
 		}
 
-		if (owner->intentionalStop.load() ||
+		if (owner->intentionalStop.load() || destination->intentionalStop.load() ||
 		    destination->route->config.failoverMode != FailoverMode::ClientSequential) {
 			destination->state.store(finalState);
 			return;
@@ -231,6 +233,7 @@ struct Runtime::Impl {
 
 	bool StartDestination(DestinationRuntime &destination)
 	{
+		destination.intentionalStop.store(false);
 		destination.state.store(RuntimeState::Starting);
 		if (obs_output_start(destination.output)) {
 			return true;
@@ -323,6 +326,9 @@ bool Runtime::Prepare(const RouteSet &routeSet, obs_output_t *referenceOutput, c
 			runtimeDestination->owner = impl.get();
 			runtimeDestination->route = runtimeRoute.get();
 			runtimeDestination->config = destination;
+			if (runtimeDestination->config.sessionId.empty()) {
+				runtimeDestination->config.sessionId = "session-" + destination.id;
+			}
 
 			OBSDataAutoRelease serviceSettings = CreateServiceSettings(destination);
 			const std::string serviceName = ContextName("service", route, &destination);
@@ -364,8 +370,18 @@ bool Runtime::Prepare(const RouteSet &routeSet, obs_output_t *referenceOutput, c
 			obs_data_set_bool(outputSettings, "dyn_bitrate", false);
 			obs_output_update(runtimeDestination->output, outputSettings);
 			obs_output_set_delay(runtimeDestination->output, options.delaySeconds, options.delayFlags);
-			obs_output_set_reconnect_settings(runtimeDestination->output, options.reconnectRetryCount,
-							  options.reconnectRetrySeconds);
+			const int reconnectRetryCount = destination.reconnectEnabled
+								? (destination.reconnectRetryCount > 0
+									   ? destination.reconnectRetryCount
+									   : options.reconnectRetryCount)
+								: 0;
+			const int reconnectRetrySeconds = destination.reconnectEnabled
+								  ? (destination.reconnectRetrySeconds > 0
+									     ? destination.reconnectRetrySeconds
+									     : options.reconnectRetrySeconds)
+								  : 0;
+			obs_output_set_reconnect_settings(runtimeDestination->output, reconnectRetryCount,
+							  reconnectRetrySeconds);
 
 			signal_handler_t *signals = obs_output_get_signal_handler(runtimeDestination->output);
 			runtimeDestination->startSignal.Connect(signals, "start", Impl::OutputStarted,
@@ -415,6 +431,38 @@ size_t Runtime::Start()
 	return started;
 }
 
+size_t Runtime::StartSession(std::string_view sessionId)
+{
+	if (sessionId.empty()) {
+		return 0;
+	}
+
+	impl->intentionalStop.store(false);
+	size_t started = 0;
+	for (auto &route : impl->routes) {
+		if (route->config.failoverMode == FailoverMode::ClientSequential) {
+			for (auto &destination : route->destinations) {
+				if (destination->config.sessionId != sessionId) {
+					continue;
+				}
+				if (impl->StartDestination(*destination)) {
+					++started;
+				}
+				break;
+			}
+			continue;
+		}
+
+		for (auto &destination : route->destinations) {
+			if (destination->config.sessionId == sessionId && impl->StartDestination(*destination)) {
+				++started;
+			}
+		}
+	}
+
+	return started;
+}
+
 void Runtime::Stop(bool force)
 {
 	impl->intentionalStop.store(true);
@@ -422,6 +470,38 @@ void Runtime::Stop(bool force)
 
 	for (auto &route : impl->routes) {
 		for (auto &destination : route->destinations) {
+			destination->intentionalStop.store(true);
+			const RuntimeState state = destination->state.load();
+			if (!obs_output_active(destination->output) && state != RuntimeState::Starting) {
+				continue;
+			}
+			destination->state.store(RuntimeState::Stopping);
+			outputs.emplace_back(obs_output_get_ref(destination->output));
+		}
+	}
+
+	for (auto &output : outputs) {
+		if (force) {
+			obs_output_force_stop(output);
+		} else {
+			obs_output_stop(output);
+		}
+	}
+}
+
+void Runtime::StopSession(std::string_view sessionId, bool force)
+{
+	if (sessionId.empty()) {
+		return;
+	}
+
+	std::vector<OBSOutputAutoRelease> outputs;
+	for (auto &route : impl->routes) {
+		for (auto &destination : route->destinations) {
+			if (destination->config.sessionId != sessionId) {
+				continue;
+			}
+			destination->intentionalStop.store(true);
 			const RuntimeState state = destination->state.load();
 			if (!obs_output_active(destination->output) && state != RuntimeState::Starting) {
 				continue;
@@ -479,6 +559,7 @@ std::vector<DestinationSnapshot> Runtime::Snapshot() const
 		for (const auto &destination : route->destinations) {
 			DestinationSnapshot snapshot;
 			snapshot.routeId = route->config.id;
+			snapshot.sessionId = destination->config.sessionId;
 			snapshot.destinationId = destination->config.id;
 			snapshot.name = destination->config.name;
 			snapshot.state = destination->state.load();
@@ -489,6 +570,45 @@ std::vector<DestinationSnapshot> Runtime::Snapshot() const
 			snapshots.emplace_back(std::move(snapshot));
 		}
 	}
+	return snapshots;
+}
+
+std::vector<SessionSnapshot> Runtime::SessionSnapshots() const
+{
+	std::vector<SessionSnapshot> snapshots;
+	std::unordered_map<std::string, size_t> indexes;
+	std::lock_guard lock(impl->mutex);
+
+	for (const auto &route : impl->routes) {
+		for (const auto &destination : route->destinations) {
+			const std::string &sessionId = destination->config.sessionId;
+			auto index = indexes.find(sessionId);
+			if (index == indexes.end()) {
+				indexes.emplace(sessionId, snapshots.size());
+				snapshots.push_back(SessionSnapshot{});
+				snapshots.back().sessionId = sessionId;
+				index = indexes.find(sessionId);
+			}
+
+			SessionSnapshot &snapshot = snapshots[index->second];
+			snapshot.endpointCount++;
+			const RuntimeState state = destination->state.load();
+			if (state == RuntimeState::Failed ||
+			    (!snapshot.lastError.empty() && state != RuntimeState::Active)) {
+				snapshot.state = RuntimeState::Failed;
+				if (snapshot.lastError.empty()) {
+					snapshot.lastError = destination->lastError;
+				}
+			} else if (state == RuntimeState::Stopping) {
+				snapshot.state = RuntimeState::Stopping;
+			} else if (state == RuntimeState::Starting) {
+				snapshot.state = RuntimeState::Starting;
+			} else if (state == RuntimeState::Active) {
+				snapshot.state = RuntimeState::Active;
+			}
+		}
+	}
+
 	return snapshots;
 }
 
