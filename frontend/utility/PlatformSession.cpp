@@ -233,10 +233,11 @@ std::vector<std::string> Validate(const PlatformSessionConfig &session, const Se
 		if (!endpointIds.insert(endpoint.id).second) {
 			errors.emplace_back("duplicate endpoint id: " + endpoint.id);
 		}
-		if (endpoint.service.empty()) {
+		if (session.enabled && endpoint.enabled && endpoint.service.empty()) {
 			errors.emplace_back("endpoint[" + std::to_string(index) + "]: service is empty");
 		}
-		if (endpoint.server.empty() && endpoint.serviceSettingsJson.empty()) {
+		if (session.enabled && endpoint.enabled && endpoint.server.empty() &&
+		    endpoint.serviceSettingsJson.empty()) {
 			errors.emplace_back("endpoint[" + std::to_string(index) + "]: server is empty");
 		}
 	}
@@ -514,6 +515,9 @@ RouteSet ToRouteSet(const SessionSet &set)
 			}
 			for (const OutputEndpoint &endpoint : session.endpoints) {
 				auto destination = DestinationFromEndpoint(endpoint, session.id);
+				// Keep disabled sessions persisted while excluding their endpoints
+				// from the compatibility runtime projection.
+				destination.enabled = destination.enabled && session.enabled;
 				destination.dynamicBitrateEnabled = session.dynamicBitrateEnabled;
 				route.destinations.emplace_back(std::move(destination));
 			}

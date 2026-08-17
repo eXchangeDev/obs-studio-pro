@@ -75,5 +75,11 @@ int main()
 	CHECK(projected.routes[1].destinations.size() == 1);
 	CHECK(projected.routes[1].destinations[0].sessionId == "youtube-session");
 	CHECK(projected.routes[1].destinations[0].dynamicBitrateEnabled);
+
+	restored.sessions[1].enabled = false;
+	const auto disabledProjection = OBS::Output::ToRouteSet(restored);
+	CHECK(disabledProjection.routes.size() == 2);
+	CHECK(disabledProjection.routes[1].destinations.size() == 1);
+	CHECK(!disabledProjection.routes[1].destinations[0].enabled);
 	return 0;
 }

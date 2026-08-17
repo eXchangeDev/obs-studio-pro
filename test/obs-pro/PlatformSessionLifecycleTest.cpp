@@ -142,5 +142,13 @@ int main()
 	const auto encoderSettings = nlohmann::json::parse(savedProgram->videoEncoderSettingsJson);
 	CHECK(encoderSettings.at("bitrate").get<int>() == 50000);
 	CHECK(encoderSettings.at("rate_control").get<std::string>() == "CBR");
+
+	restored.sessions[0].enabled = false;
+	ScenarioRuntime primaryDisabled(restored);
+	CHECK(!primaryDisabled.StartSession("stream1"));
+	CHECK(primaryDisabled.StartSession("youtube-session"));
+	CHECK(primaryDisabled.StartReplay());
+	CHECK(primaryDisabled.SessionActive("youtube-session"));
+	CHECK(primaryDisabled.ReplayActive());
 	return 0;
 }

@@ -155,10 +155,10 @@ std::vector<std::string> Validate(const Destination &destination)
 	if (destination.name.empty()) {
 		errors.emplace_back("destination name is empty");
 	}
-	if (destination.service.empty()) {
+	if (destination.enabled && destination.service.empty()) {
 		errors.emplace_back("destination service is empty");
 	}
-	if (destination.server.empty() && destination.serviceSettingsJson.empty()) {
+	if (destination.enabled && destination.server.empty() && destination.serviceSettingsJson.empty()) {
 		errors.emplace_back("destination server is empty");
 	}
 

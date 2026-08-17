@@ -693,8 +693,11 @@ size_t BasicOutputHandler::StartOutputRoutes()
 
 size_t BasicOutputHandler::StartOutputSession(std::string_view sessionId)
 {
-	size_t started = outputRoutes.StartSession(sessionId);
 	auto *session = FindPlatformSession(sessionId);
+	if (session && !session->Config().enabled) {
+		return 0;
+	}
+	size_t started = outputRoutes.StartSession(sessionId);
 	if (!session) {
 		return started;
 	}
@@ -1019,7 +1022,8 @@ std::shared_future<void> BasicOutputHandler::SetupMultitrackVideo(OBS::Output::P
 {
 	auto start_streaming_guard = std::make_shared<StartMultitrackVideoStreamingGuard>();
 	obs_service_t *service = session.Service();
-	if (!service || session.Config().deliveryMode != OBS::Output::DeliveryMode::EnhancedMultitrack) {
+	if (!service || !session.Config().enabled ||
+	    session.Config().deliveryMode != OBS::Output::DeliveryMode::EnhancedMultitrack) {
 		continuation(std::nullopt);
 		return start_streaming_guard->GetFuture();
 	}

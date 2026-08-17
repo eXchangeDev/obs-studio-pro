@@ -100,6 +100,13 @@ OBSEncoderAutoRelease CreateVideoEncoder(const Route &route, obs_canvas_t *canva
 	}
 
 	obs_encoder_set_video(encoder, video);
+	obs_video_info videoInfo{};
+	obs_canvas_get_video_info(canvas, &videoInfo);
+	blog(LOG_INFO,
+	     "OBS Studio Pro: Program '%s' video encoder='%s' canvas=%ux%u output=%ux%u fps=%u/%u bitrate=%lld Kbps",
+	     route.name.c_str(), encoderId, videoInfo.base_width, videoInfo.base_height, videoInfo.output_width,
+	     videoInfo.output_height, videoInfo.fps_num, videoInfo.fps_den,
+	     static_cast<long long>(obs_data_get_int(settings, "bitrate")));
 	return encoder;
 }
 
@@ -132,6 +139,13 @@ OBSEncoderAutoRelease CreateAudioEncoder(const Route &route, obs_encoder_t *refe
 		settings = obs_encoder_defaults(encoderId);
 	}
 	ApplyJsonSettings(settings, route.audioEncoderSettingsJson);
+	OBSProperties properties = obs_get_encoder_properties(encoderId);
+	const bool exposesBitrate = properties && obs_properties_get(properties, "bitrate");
+	const int64_t bitrate = obs_data_get_int(settings, "bitrate");
+	if (exposesBitrate && bitrate <= 0) {
+		error = "audio encoder '" + std::string(encoderId) + "' resolved to an invalid bitrate";
+		return nullptr;
+	}
 	const std::string name = ContextName("audio", route);
 	OBSEncoderAutoRelease encoder =
 		obs_audio_encoder_create(encoderId, name.c_str(), settings, route.audioMix, nullptr);
@@ -141,6 +155,8 @@ OBSEncoderAutoRelease CreateAudioEncoder(const Route &route, obs_encoder_t *refe
 	}
 
 	obs_encoder_set_audio(encoder, obs_get_audio());
+	blog(LOG_INFO, "OBS Studio Pro: Program '%s' audio encoder='%s' mix=%u bitrate=%lld Kbps", route.name.c_str(),
+	     encoderId, route.audioMix + 1, static_cast<long long>(bitrate));
 	return encoder;
 }
 

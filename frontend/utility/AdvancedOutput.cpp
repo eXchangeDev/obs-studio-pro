@@ -650,6 +650,11 @@ std::shared_future<void> AdvancedOutput::SetupStreaming(obs_service_t *service,
 		continuation(false);
 		return StartMultitrackVideoStreamingGuard::MakeReadyFuture();
 	}
+	if (!compatibilitySession->Config().enabled) {
+		outputRoutes.Clear();
+		continuation(PrepareOutputRoutes(videoStreaming, streamAudioEnc));
+		return StartMultitrackVideoStreamingGuard::MakeReadyFuture();
+	}
 
 	/* --------------------- */
 
@@ -668,7 +673,7 @@ std::shared_future<void> AdvancedOutput::SetupStreaming(obs_service_t *service,
 		if (multitrackVideoResult.has_value()) {
 			outputRoutes.Clear();
 			if (multitrackVideoResult.value()) {
-				PrepareOutputRoutes(multitrackVideo->StreamingOutput());
+				PrepareOutputRoutes(videoStreaming, streamAudioEnc);
 			}
 			return multitrackVideoResult.value();
 		}
@@ -726,6 +731,16 @@ std::shared_future<void> AdvancedOutput::SetupStreaming(obs_service_t *service,
 
 bool AdvancedOutput::StartStreaming(obs_service_t *service)
 {
+	if (compatibilitySession && !compatibilitySession->Config().enabled) {
+		const size_t started = StartOutputRoutes();
+		if (started > 0) {
+			return true;
+		}
+		lastError = "No enabled platform session could be started";
+		compatibilitySession->SetState(OBS::Output::SessionRuntimeState::Idle);
+		return false;
+	}
+
 	obs_output_set_service(streamOutput, service);
 
 	bool reconnect = config_get_bool(main->Config(), "Output", "Reconnect");
@@ -806,6 +821,10 @@ bool AdvancedOutput::StartStreaming(obs_service_t *service)
 	const char *type = obs_output_get_id(streamOutput);
 	blog(LOG_WARNING, "Stream output type '%s' failed to start!%s%s", type, hasLastError ? "  Last Error: " : "",
 	     hasLastError ? error : "");
+	if (StartOutputRoutes() > 0) {
+		blog(LOG_WARNING, "OBS Studio Pro: primary session failed, independent sessions remain active");
+		return true;
+	}
 	return false;
 }
 
