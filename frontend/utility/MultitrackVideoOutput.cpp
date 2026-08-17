@@ -867,15 +867,16 @@ std::optional<MultitrackVideoOutput::OBSOutputObjects> MultitrackVideoOutput::ta
 	return val;
 }
 
-void MultitrackVideoOutput::ReleaseOnMainThread(MultitrackVideoOutput *self,
-							 std::weak_ptr<int> lifetime_token, bool stream_dump)
+void MultitrackVideoOutput::ReleaseOnMainThread(MultitrackVideoOutput *self, std::weak_ptr<int> lifetime_token,
+						bool stream_dump)
 {
 	if (!self || lifetime_token.expired()) {
 		return;
 	}
 
 	QMetaObject::invokeMethod(
-		QApplication::instance()->thread(), [self, lifetime_token = std::move(lifetime_token), stream_dump] {
+		QApplication::instance()->thread(),
+		[self, lifetime_token = std::move(lifetime_token), stream_dump] {
 			if (lifetime_token.expired()) {
 				return;
 			}
