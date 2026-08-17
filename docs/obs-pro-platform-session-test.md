@@ -11,12 +11,14 @@ This credentialed test verifies that a local 50 Mbps YouTube Program feeds both 
 
 ## Configure the graph
 
-1. In **Settings → Output**, add an encoded output named `YouTube HQ`.
+1. In **Settings → Output → Additional encoded programs**, add a Program named `YouTube HQ`.
 2. Bind it to the horizontal canvas, choose the intended video/audio encoders, and set the video encoder to CBR `50000 Kbps`.
 3. In **Settings → Stream**, add a YouTube destination, keep it in an **Independent session**, assign it to `YouTube HQ`, and enter the YouTube RTMPS service settings.
-4. In the native primary Stream tab, select Twitch and enable Enhanced Broadcasting. Select the optional vertical canvas if required.
-5. In **Settings → Output → Main Output**, set **Replay Buffer Program** to `YouTube HQ`.
+4. In the native primary Stream tab, keep the session active, select Twitch and enable Enhanced Broadcasting. Select the optional vertical canvas if required.
+5. In the normal **Settings → Output → Replay Buffer** section, set **Encoded Program** to `YouTube HQ`.
 6. Apply settings and restart outputs if OBS asks.
+
+After applying, the selected Stream, Program, and Canvas tabs must remain selected. The primary stream may be disabled; in that configuration **Start Streaming** starts only the other active sessions.
 
 ## Exercise the lifecycle
 
