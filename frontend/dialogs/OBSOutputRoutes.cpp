@@ -574,9 +574,6 @@ struct OBSOutputRoutesSettings::Impl {
 		canvasTabs = new QTabWidget(videoPage);
 		videoPage->layout()->addWidget(canvasTabs);
 		MoveWidgetToTab(canvasTabs, nativeVideoPage, QTStr("Basic.Settings.Advanced"));
-		if (outputTabs->count() > 0) {
-			outputTabs->widget(0)->setProperty("outputRouteId", QStringLiteral("global"));
-		}
 
 		auto addReplayProgram = [this](QWidget *parent, QFormLayout *form) {
 			if (!parent || !form) {
