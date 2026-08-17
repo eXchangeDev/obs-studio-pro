@@ -92,6 +92,9 @@ struct Route {
 	std::string audioEncoderId;
 	std::string videoEncoderSettingsJson;
 	std::string audioEncoderSettingsJson;
+	// A zero value inherits the primary encoder bitrate.  A non-zero value
+	// overrides only the bitrate while keeping the inherited encoder type.
+	uint32_t videoBitrateOverride = 0;
 	uint32_t audioMix = 0;
 
 	// This models failover that OBS itself performs. Any redundancy behind a

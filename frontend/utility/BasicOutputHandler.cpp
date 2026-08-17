@@ -357,10 +357,11 @@ void BasicOutputHandler::UpdateAggregateStreamingState(int code, std::string_vie
 		anySessionActive = std::any_of(
 			platformSessionRuntimes.begin(), platformSessionRuntimes.end(), [](const auto &session) {
 				const auto state = session->State();
+				const bool outputActive = session->Output() && obs_output_active(session->Output());
 				return state == OBS::Output::SessionRuntimeState::Starting ||
 				       state == OBS::Output::SessionRuntimeState::Active ||
-				       state == OBS::Output::SessionRuntimeState::Stopping ||
-				       (session->Output() && obs_output_active(session->Output()));
+				       (state == OBS::Output::SessionRuntimeState::Stopping && outputActive) ||
+				       outputActive;
 			});
 	}
 

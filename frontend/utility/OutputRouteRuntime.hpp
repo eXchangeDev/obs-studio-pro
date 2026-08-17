@@ -38,6 +38,12 @@ enum class RuntimeState {
 	Failed,
 };
 
+inline bool IsRuntimeActive(RuntimeState state, bool outputActive)
+{
+	return state == RuntimeState::Starting || state == RuntimeState::Active ||
+	       (state == RuntimeState::Stopping && outputActive) || outputActive;
+}
+
 struct RuntimeOptions {
 	std::string bindIp = "default";
 	std::string ipFamily = "IPv4+IPv6";

@@ -22,6 +22,8 @@ int main()
 	youtubeEndpoint.service = "rtmp_common";
 	youtubeEndpoint.serviceName = "YouTube - RTMPS";
 	youtubeEndpoint.server = "rtmps://example.invalid/live";
+	youtubeEndpoint.serviceSettingsJson =
+		R"({"service":"YouTube - RTMPS","protocol":"RTMPS","server":"rtmps://example.invalid/live","key":"secret"})";
 	youtubeEndpoint.dynamicBitrateEnabled = true;
 
 	OBS::Output::Route youtube;
@@ -75,6 +77,7 @@ int main()
 	CHECK(projected.routes[1].destinations.size() == 1);
 	CHECK(projected.routes[1].destinations[0].sessionId == "youtube-session");
 	CHECK(projected.routes[1].destinations[0].dynamicBitrateEnabled);
+	CHECK(projected.routes[1].destinations[0].serviceSettingsJson == youtubeEndpoint.serviceSettingsJson);
 
 	restored.sessions[1].enabled = false;
 	const auto disabledProjection = OBS::Output::ToRouteSet(restored);

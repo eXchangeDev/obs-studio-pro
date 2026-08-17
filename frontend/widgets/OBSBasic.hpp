@@ -1402,6 +1402,7 @@ public slots:
 	void StartStreaming();
 	void StopStreaming();
 	void ForceStopStreaming();
+	void ReconcileStreamingStop();
 
 	void StreamDelayStarting(int sec);
 	void StreamDelayStopping(int sec);

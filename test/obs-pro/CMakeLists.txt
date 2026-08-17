@@ -29,5 +29,30 @@ function(add_obs_pro_session_test target source)
   set_target_properties(${target} PROPERTIES FOLDER "tests and examples")
 endfunction()
 
+function(add_obs_pro_libobs_test target source)
+  add_executable(${target})
+  target_sources(${target} PRIVATE ${source})
+  target_include_directories(${target} PRIVATE ../../libobs)
+  target_link_libraries(${target} PRIVATE OBS::libobs)
+  add_test(NAME ${target} COMMAND ${target})
+
+  set(test_runtime_directory "$<TARGET_FILE_DIR:OBS::libobs>")
+  if(OS_WINDOWS)
+    set(test_runtime_directory "${OBS_OUTPUT_DIR}/$<CONFIG>/${OBS_EXECUTABLE_DESTINATION}")
+  endif()
+
+  set_tests_properties(
+    ${target}
+    PROPERTIES
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${test_runtime_directory}"
+      WORKING_DIRECTORY "${test_runtime_directory}"
+      TIMEOUT 30
+  )
+  set_target_properties(${target} PROPERTIES FOLDER "tests and examples")
+endfunction()
+
 add_obs_pro_session_test(obs-pro-platform-session-model-test PlatformSessionModelTest.cpp)
 add_obs_pro_session_test(obs-pro-platform-session-lifecycle-test PlatformSessionLifecycleTest.cpp)
+add_obs_pro_session_test(obs-pro-output-route-runtime-state-test OutputRouteRuntimeStateTest.cpp)
+add_obs_pro_libobs_test(obs-pro-canvas-persistence-test CanvasPersistenceTest.cpp)
+add_obs_pro_libobs_test(obs-pro-primary-service-settings-test PrimaryServiceSettingsTest.cpp)

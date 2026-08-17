@@ -92,6 +92,9 @@ OBSEncoderAutoRelease CreateVideoEncoder(const Route &route, obs_canvas_t *canva
 		settings = obs_encoder_defaults(encoderId);
 	}
 	ApplyJsonSettings(settings, route.videoEncoderSettingsJson);
+	if (route.videoEncoderId.empty() && route.videoBitrateOverride > 0 && settings) {
+		obs_data_set_int(settings, "bitrate", route.videoBitrateOverride);
+	}
 	const std::string name = ContextName("video", route);
 	OBSEncoderAutoRelease encoder = obs_video_encoder_create(encoderId, name.c_str(), settings, nullptr);
 	if (!encoder) {
@@ -315,7 +318,13 @@ struct Runtime::Impl {
 
 	bool StartDestination(DestinationRuntime &destination)
 	{
-		const RuntimeState currentState = destination.state.load();
+		RuntimeState currentState = destination.state.load();
+		if (currentState == RuntimeState::Stopping && !obs_output_active(destination.output)) {
+			/* A stop callback can be lost while the libobs output has already
+			 * become inactive. Do not let that stale state block a restart. */
+			destination.state.store(RuntimeState::Idle);
+			currentState = RuntimeState::Idle;
+		}
 		if (currentState == RuntimeState::Starting || currentState == RuntimeState::Active ||
 		    currentState == RuntimeState::Stopping || obs_output_active(destination.output)) {
 			return false;
@@ -655,8 +664,8 @@ bool Runtime::Active() const
 	for (const auto &route : impl->routes) {
 		for (const auto &destination : route->destinations) {
 			const RuntimeState state = destination->state.load();
-			if (state == RuntimeState::Starting || state == RuntimeState::Active ||
-			    state == RuntimeState::Stopping || obs_output_active(destination->output)) {
+			const bool outputActive = obs_output_active(destination->output);
+			if (IsRuntimeActive(state, outputActive)) {
 				return true;
 			}
 		}
