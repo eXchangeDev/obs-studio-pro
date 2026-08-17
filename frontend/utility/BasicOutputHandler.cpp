@@ -30,6 +30,10 @@ void OBSStreamStarting(void *data, calldata_t *params)
 {
 	BasicOutputHandler *output = static_cast<BasicOutputHandler *>(data);
 	obs_output_t *obj = (obs_output_t *)calldata_ptr(params, "output");
+	if (auto *session = output->FindPlatformSessionForOutput(obj);
+	    session && session != output->compatibilitySession) {
+		return;
+	}
 
 	int sec = (int)obs_output_get_active_delay(obj);
 	if (sec == 0) {
@@ -44,6 +48,10 @@ void OBSStreamStopping(void *data, calldata_t *params)
 {
 	BasicOutputHandler *output = static_cast<BasicOutputHandler *>(data);
 	obs_output_t *obj = (obs_output_t *)calldata_ptr(params, "output");
+	if (auto *session = output->FindPlatformSessionForOutput(obj);
+	    session && session != output->compatibilitySession) {
+		return;
+	}
 
 	int sec = (int)obs_output_get_active_delay(obj);
 	if (sec == 0) {

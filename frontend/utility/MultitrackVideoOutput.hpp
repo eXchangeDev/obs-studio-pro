@@ -22,6 +22,8 @@ void RecordingStopHandler(void *arg, calldata_t *);
 
 struct MultitrackVideoOutput {
 public:
+	~MultitrackVideoOutput();
+
 	void PrepareStreaming(QWidget *parent, const char *service_name, obs_service_t *service,
 			      const std::optional<std::string> &rtmp_url, const QString &stream_key,
 			      const char *audio_encoder_id, std::optional<uint32_t> maximum_aggregate_bitrate,
@@ -55,13 +57,18 @@ private:
 	std::optional<OBSOutputObjects> take_current();
 	std::optional<OBSOutputObjects> take_current_stream_dump();
 
-	static void ReleaseOnMainThread(std::optional<OBSOutputObjects> objects);
+	/* Stop callbacks are dispatched to every listener in order. Defer taking
+	 * the current objects until that dispatch has completed so destroying the
+	 * internal stop signal cannot skip a frontend stop callback. */
+	static void ReleaseOnMainThread(MultitrackVideoOutput *self, std::weak_ptr<int> lifetime_token,
+					bool stream_dump);
 
 	std::mutex current_mutex;
 	std::optional<OBSOutputObjects> current;
 
 	std::mutex current_stream_dump_mutex;
 	std::optional<OBSOutputObjects> current_stream_dump;
+	std::shared_ptr<int> lifetime_token = std::make_shared<int>(0);
 
 	bool restart_on_error = false;
 	uint8_t reconnect_attempts = 0;

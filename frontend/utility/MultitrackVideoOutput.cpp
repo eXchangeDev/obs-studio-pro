@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cinttypes>
+#include <utility>
 
 // Codec profile strings
 static const char *h264_main = "Main";
@@ -35,6 +36,11 @@ using json = nlohmann::json;
 Qt::ConnectionType BlockingConnectionTypeFor(QObject *object)
 {
 	return object->thread() == QThread::currentThread() ? Qt::DirectConnection : Qt::BlockingQueuedConnection;
+}
+
+MultitrackVideoOutput::~MultitrackVideoOutput()
+{
+	lifetime_token.reset();
 }
 
 static OBSServiceAutoRelease create_service(const GoLiveApi::Config &go_live_config,
@@ -861,15 +867,27 @@ std::optional<MultitrackVideoOutput::OBSOutputObjects> MultitrackVideoOutput::ta
 	return val;
 }
 
-void MultitrackVideoOutput::ReleaseOnMainThread(std::optional<OBSOutputObjects> objects)
+void MultitrackVideoOutput::ReleaseOnMainThread(MultitrackVideoOutput *self,
+							 std::weak_ptr<int> lifetime_token, bool stream_dump)
 {
-
-	if (!objects.has_value()) {
+	if (!self || lifetime_token.expired()) {
 		return;
 	}
 
 	QMetaObject::invokeMethod(
-		QApplication::instance()->thread(), [objects = std::move(objects)] {}, Qt::QueuedConnection);
+		QApplication::instance()->thread(), [self, lifetime_token = std::move(lifetime_token), stream_dump] {
+			if (lifetime_token.expired()) {
+				return;
+			}
+			/* Moving the objects here, after the output's stop signal has
+			 * returned, disconnects the internal signal safely. */
+			if (stream_dump) {
+				self->take_current_stream_dump();
+			} else {
+				self->take_current();
+			}
+		},
+		Qt::QueuedConnection);
 }
 
 void StreamStartHandler(void *arg, calldata_t *)
@@ -898,7 +916,7 @@ void StreamStopHandler(void *arg, calldata_t *data)
 	obs_output_remove_packet_callback(static_cast<obs_output_t *>(calldata_ptr(data, "output")), bpm_inject, NULL);
 	bpm_destroy(static_cast<obs_output_t *>(calldata_ptr(data, "output")));
 
-	MultitrackVideoOutput::ReleaseOnMainThread(self->take_current());
+	MultitrackVideoOutput::ReleaseOnMainThread(self, self->lifetime_token, false);
 }
 
 void RecordingStartHandler(void * /* arg */, calldata_t * /* data */)
@@ -910,5 +928,5 @@ void RecordingStopHandler(void *arg, calldata_t *)
 {
 	auto self = static_cast<MultitrackVideoOutput *>(arg);
 	blog(LOG_INFO, "MultitrackVideoOutput: recording stopped");
-	MultitrackVideoOutput::ReleaseOnMainThread(self->take_current_stream_dump());
+	MultitrackVideoOutput::ReleaseOnMainThread(self, self->lifetime_token, true);
 }
