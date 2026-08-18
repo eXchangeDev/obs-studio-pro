@@ -14,6 +14,7 @@
 #include <QLabel>
 #include <QLayout>
 #include <QScrollArea>
+#include <QSizePolicy>
 #include <QVBoxLayout>
 
 namespace {
@@ -70,6 +71,8 @@ OBSNativeSettingsPage::OBSNativeSettingsPage(QWidget *page, bool scrollable)
 	auto *contentsLayout = new QVBoxLayout(contents);
 	contentsLayout->setContentsMargins(0, 0, 0, 0);
 	contentsLayout->setSpacing(6);
+	contentsLayout->setSizeConstraint(QLayout::SetMinimumSize);
+	contents->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
 	scroll->setWidget(contents);
 	layout->addWidget(scroll);
 }
@@ -85,6 +88,8 @@ QScrollArea *OBSNativeSettingsPage::MoveContentsToScroll(QWidget *page)
 	auto *contentsLayout = new QVBoxLayout(contents);
 	contentsLayout->setContentsMargins(0, 0, 0, 0);
 	contentsLayout->setSpacing(pageLayout->spacing());
+	contentsLayout->setSizeConstraint(QLayout::SetMinimumSize);
+	contents->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
 
 	while (QLayoutItem *item = pageLayout->takeAt(0)) {
 		if (QWidget *widget = item->widget()) {

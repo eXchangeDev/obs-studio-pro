@@ -89,6 +89,39 @@ QString NewId()
 	return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
 
+void AddBeforeVerticalSpacer(QVBoxLayout *layout, QWidget *widget)
+{
+	if (!layout || !widget) {
+		return;
+	}
+
+	for (int index = 0; index < layout->count(); ++index) {
+		QLayoutItem *item = layout->itemAt(index);
+		if (item && item->spacerItem() &&
+		    item->spacerItem()->sizePolicy().verticalPolicy() == QSizePolicy::Expanding) {
+			layout->insertWidget(index, widget);
+			return;
+		}
+	}
+
+	layout->addWidget(widget);
+}
+
+void ConfigureEmbeddedPropertiesView(OBSPropertiesView *view)
+{
+	if (!view) {
+		return;
+	}
+
+	view->setFrameShape(QFrame::NoFrame);
+	view->setScrolling(false);
+	view->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
+	QObject::connect(view, &OBSPropertiesView::PropertiesRefreshed, view, [view]() {
+		view->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
+		view->updateGeometry();
+	});
+}
+
 QString ResolutionText(uint32_t width, uint32_t height)
 {
 	return QStringLiteral("%1x%2").arg(width).arg(height);
@@ -1068,8 +1101,7 @@ struct OBSOutputRoutesSettings::Impl {
 
 		ui.properties = new OBSPropertiesView(settings.Get(), destination->service.c_str(),
 						      (PropertiesReloadCallback)obs_get_service_properties, 170);
-		ui.properties->setFrameShape(QFrame::NoFrame);
-		ui.properties->setScrolling(false);
+		ConfigureEmbeddedPropertiesView(ui.properties);
 		ui.propertiesLayout->addWidget(ui.properties);
 		QObject::connect(ui.properties, &OBSPropertiesView::Changed, ui.page, [this]() { MarkChanged(); });
 	}
@@ -1125,13 +1157,17 @@ struct OBSOutputRoutesSettings::Impl {
 			OBSNativeSettingsPage page(primaryDestinationExtras, false);
 			contents = page.Contents();
 			layout = page.Layout();
-			nativeStreamPage->widget()->layout()->addWidget(primaryDestinationExtras);
+			AddBeforeVerticalSpacer(qobject_cast<QVBoxLayout *>(nativeStreamPage->widget()->layout()),
+						primaryDestinationExtras);
 		} else {
 			OBSNativeSettingsPage page(ui->page);
 			contents = page.Contents();
 			layout = page.Layout();
 		}
-		auto *settings = new QGroupBox(QTStr("Basic.Settings.Stream.Destination"), contents);
+		auto *settings = new QGroupBox(primary ? QTStr("OBSPro.Settings.Session.Controls")
+						       : QTStr("Basic.Settings.Stream.Destination"),
+					       contents);
+		settings->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
 		auto *form = new QFormLayout(settings);
 		OBSNativeSettingsPage::ConfigureForm(form);
 		layout->addWidget(settings);
@@ -1168,6 +1204,7 @@ struct OBSOutputRoutesSettings::Impl {
 
 		if (!primary) {
 			auto *properties = new QGroupBox(QTStr("OBSPro.Settings.Stream.ServiceSettings"), contents);
+			properties->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
 			ui->propertiesLayout = new QVBoxLayout(properties);
 			ui->propertiesLayout->setContentsMargins(9, 2, 9, 9);
 			layout->addWidget(properties);
@@ -1394,8 +1431,7 @@ struct OBSOutputRoutesSettings::Impl {
 		OBSDataAutoRelease settings = SettingsFromJson(serialized, defaults);
 		view = new OBSPropertiesView(settings.Get(), encoderId.c_str(),
 					     (PropertiesReloadCallback)obs_get_encoder_properties, 170);
-		view->setFrameShape(QFrame::NoFrame);
-		view->setScrolling(false);
+		ConfigureEmbeddedPropertiesView(view);
 		layout->addWidget(view);
 		QObject::connect(view, &OBSPropertiesView::Changed, ui.page, [this]() { MarkChanged(); });
 	}
@@ -1445,6 +1481,7 @@ struct OBSOutputRoutesSettings::Impl {
 			QWidget *contents = page.Contents();
 			auto *contentsLayout = page.Layout();
 			auto *settings = new QGroupBox(QTStr("Basic.Settings.Output.Adv.Streaming.Settings"), contents);
+			settings->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
 			auto *form = new QFormLayout(settings);
 			OBSNativeSettingsPage::ConfigureForm(form);
 			contentsLayout->addWidget(settings);
@@ -1490,11 +1527,13 @@ struct OBSOutputRoutesSettings::Impl {
 
 			auto *videoGroup =
 				new QGroupBox(QTStr("OBSPro.Settings.Output.VideoEncoderSettings"), contents);
+			videoGroup->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
 			ui->videoPropertiesLayout = new QVBoxLayout(videoGroup);
 			ui->videoPropertiesLayout->setContentsMargins(8, 2, 8, 8);
 			contentsLayout->addWidget(videoGroup);
 			auto *audioGroup =
 				new QGroupBox(QTStr("OBSPro.Settings.Output.AudioEncoderSettings"), contents);
+			audioGroup->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
 			ui->audioPropertiesLayout = new QVBoxLayout(audioGroup);
 			ui->audioPropertiesLayout->setContentsMargins(8, 2, 8, 8);
 			contentsLayout->addWidget(audioGroup);
@@ -1774,21 +1813,24 @@ struct OBSOutputRoutesSettings::Impl {
 		}
 
 		QWidget *contents = nativeVideoPage->widget();
-		auto *contentsLayout = contents ? qobject_cast<QVBoxLayout *>(contents->layout()) : nullptr;
-		if (!contents || !contentsLayout) {
+		if (!contents) {
 			return;
 		}
 
 		ui->name = contents->findChild<QLineEdit *>(QStringLiteral("mainCanvasName"));
 		if (!ui->name) {
-			auto *identity = new QGroupBox(QTStr("OBSPro.Settings.Canvas.Main"), contents);
-			identity->setObjectName(QStringLiteral("mainCanvasIdentity"));
-			auto *form = new QFormLayout(identity);
-			OBSNativeSettingsPage::ConfigureForm(form);
-			ui->name = new QLineEdit(mainCanvasDraftName, identity);
+			auto *general = contents->findChild<QGroupBox *>(QStringLiteral("videoGeneral"));
+			auto *form = general ? general->findChild<QFormLayout *>(QStringLiteral("formLayout_15"))
+					     : nullptr;
+			if (!general || !form) {
+				return;
+			}
+			ui->name = new QLineEdit(mainCanvasDraftName, general);
 			ui->name->setObjectName(QStringLiteral("mainCanvasName"));
-			OBSNativeSettingsPage::AddRow(form, identity, QTStr("OBSPro.OutputRoutes.Name"), ui->name);
-			contentsLayout->addWidget(identity);
+			form->insertRow(0,
+					OBSNativeSettingsPage::CreateLabel(general, QTStr("OBSPro.OutputRoutes.Name"),
+									   ui->name),
+					ui->name);
 		} else {
 			ui->name->setText(mainCanvasDraftName);
 		}
