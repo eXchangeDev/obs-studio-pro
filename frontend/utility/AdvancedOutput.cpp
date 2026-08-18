@@ -1024,7 +1024,7 @@ void AdvancedOutput::StopReplayBuffer(bool force)
 
 bool AdvancedOutput::StreamingActive() const
 {
-	return obs_output_active(StreamingOutput()) || outputRoutes.Active();
+	return HasActiveStreamingState();
 }
 
 bool AdvancedOutput::RecordingActive() const

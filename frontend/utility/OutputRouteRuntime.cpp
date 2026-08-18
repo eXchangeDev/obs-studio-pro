@@ -263,6 +263,25 @@ struct Runtime::Impl {
 		options.stateChanged(destination.config.sessionId, state, error);
 	}
 
+	bool ResetInactiveDestination(DestinationRuntime &destination)
+	{
+		const RuntimeState state = destination.state.load();
+		if (obs_output_active(destination.output) || state == RuntimeState::Starting) {
+			return false;
+		}
+
+		if (state == RuntimeState::Active || state == RuntimeState::Stopping) {
+			destination.state.store(RuntimeState::Idle);
+			{
+				std::lock_guard lock(mutex);
+				destination.lastError.clear();
+			}
+			NotifyStateChanged(destination);
+		}
+
+		return true;
+	}
+
 	static void OutputStarted(void *data, calldata_t *)
 	{
 		auto *destination = static_cast<DestinationRuntime *>(data);
@@ -600,16 +619,7 @@ void Runtime::Stop(bool force)
 	for (auto &route : impl->routes) {
 		for (auto &destination : route->destinations) {
 			destination->intentionalStop.store(true);
-			const RuntimeState state = destination->state.load();
-			if (!obs_output_active(destination->output) && state != RuntimeState::Starting) {
-				if (state == RuntimeState::Active || state == RuntimeState::Stopping) {
-					destination->state.store(RuntimeState::Idle);
-					{
-						std::lock_guard lock(impl->mutex);
-						destination->lastError.clear();
-					}
-					impl->NotifyStateChanged(*destination);
-				}
+			if (impl->ResetInactiveDestination(*destination)) {
 				continue;
 			}
 			destination->state.store(RuntimeState::Stopping);
@@ -640,16 +650,7 @@ void Runtime::StopSession(std::string_view sessionId, bool force)
 				continue;
 			}
 			destination->intentionalStop.store(true);
-			const RuntimeState state = destination->state.load();
-			if (!obs_output_active(destination->output) && state != RuntimeState::Starting) {
-				if (state == RuntimeState::Active || state == RuntimeState::Stopping) {
-					destination->state.store(RuntimeState::Idle);
-					{
-						std::lock_guard lock(impl->mutex);
-						destination->lastError.clear();
-					}
-					impl->NotifyStateChanged(*destination);
-				}
+			if (impl->ResetInactiveDestination(*destination)) {
 				continue;
 			}
 			destination->state.store(RuntimeState::Stopping);

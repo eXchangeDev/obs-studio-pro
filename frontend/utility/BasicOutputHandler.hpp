@@ -130,6 +130,12 @@ struct BasicOutputHandler {
 		       multitrackVideoActive || outputRoutes.Active();
 	}
 
+	bool HasActiveStreamingState() const
+	{
+		const auto output = StreamingOutput();
+		return streamingActive || (output && obs_output_active(output)) || outputRoutes.Active();
+	}
+
 protected:
 	bool LoadPlatformSessions(OBS::Output::RouteSet &routes, std::string &error);
 	OBS::Output::PlatformSession *PrepareCompatibilitySession(obs_service_t *service);

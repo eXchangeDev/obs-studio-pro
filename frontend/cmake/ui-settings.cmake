@@ -6,6 +6,8 @@ target_sources(
     settings/OBSBasicSettings_Stream.cpp
     settings/OBSBasicSettings.cpp
     settings/OBSBasicSettings.hpp
+    settings/OBSNativeSettingsPage.cpp
+    settings/OBSNativeSettingsPage.hpp
     settings/OBSHotkeyEdit.cpp
     settings/OBSHotkeyEdit.hpp
     settings/OBSHotkeyLabel.cpp

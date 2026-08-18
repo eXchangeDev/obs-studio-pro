@@ -17,6 +17,7 @@
 
 #include "OBSOutputRoutes.hpp"
 
+#include <settings/OBSNativeSettingsPage.hpp>
 #include <utility/PlatformSession.hpp>
 #include <utility/OutputRoute.hpp>
 #include <widgets/OBSBasic.hpp>
@@ -264,125 +265,18 @@ std::string SettingsJson(obs_data_t *settings)
 	return json ? json : "";
 }
 
-constexpr int NativeSettingsLabelWidth = 170;
-
-void ConfigureNativeSettingsForm(QFormLayout *form)
-{
-	form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-	form->setLabelAlignment(Qt::AlignRight | Qt::AlignTrailing | Qt::AlignVCenter);
-	form->setContentsMargins(9, 2, 9, 9);
-}
-
-QLabel *CreateNativeSettingsLabel(QWidget *parent, const QString &text, QWidget *buddy = nullptr)
-{
-	auto *label = new QLabel(text, parent);
-	label->setMinimumSize(NativeSettingsLabelWidth, 0);
-	label->setAlignment(Qt::AlignRight | Qt::AlignTrailing | Qt::AlignVCenter);
-	if (buddy) {
-		label->setBuddy(buddy);
-	}
-	return label;
-}
-
-void AddNativeSettingsRow(QFormLayout *form, QWidget *parent, const QString &text, QWidget *field)
-{
-	form->addRow(CreateNativeSettingsLabel(parent, text, field), field);
-}
-
-QVBoxLayout *CreateNativeSettingsPage(QWidget *page, QWidget *&contents, bool scrollable = true)
-{
-	auto *pageLayout = new QVBoxLayout(page);
-	pageLayout->setContentsMargins(0, 0, 0, 0);
-	pageLayout->setSpacing(6);
-
-	if (!scrollable) {
-		contents = page;
-		return pageLayout;
-	}
-
-	auto *scroll = new QScrollArea(page);
-	scroll->setFrameShape(QFrame::NoFrame);
-	scroll->setWidgetResizable(true);
-
-	contents = new QWidget(scroll);
-	auto *contentsLayout = new QVBoxLayout(contents);
-	contentsLayout->setContentsMargins(0, 0, 0, 0);
-	contentsLayout->setSpacing(6);
-	scroll->setWidget(contents);
-	pageLayout->addWidget(scroll);
-	return contentsLayout;
-}
-
-void ReparentLayoutWidgets(QLayout *layout, QWidget *parent)
-{
-	if (!layout) {
-		return;
-	}
-
-	for (int index = 0; index < layout->count(); ++index) {
-		QLayoutItem *item = layout->itemAt(index);
-		if (QWidget *widget = item->widget()) {
-			widget->setParent(parent);
-		} else if (QLayout *childLayout = item->layout()) {
-			ReparentLayoutWidgets(childLayout, parent);
-		}
-	}
-}
-
-QScrollArea *MovePageContentsToScroll(QWidget *page)
-{
-	QLayout *pageLayout = page->layout();
-	auto *nativePage = new QWidget(page);
-	auto *nativeLayout = new QVBoxLayout(nativePage);
-	nativeLayout->setContentsMargins(0, 0, 0, 0);
-	nativeLayout->setSpacing(pageLayout->spacing());
-
-	while (QLayoutItem *item = pageLayout->takeAt(0)) {
-		if (QWidget *widget = item->widget()) {
-			// QLayout::takeAt() transfers the layout item, but it does not
-			// reparent the widget.  Leaving the native controls on the
-			// original settings page makes them continue painting over the
-			// dynamically-created tab pages.
-			widget->setParent(nativePage);
-			nativeLayout->addWidget(widget);
-			delete item;
-		} else if (QLayout *layout = item->layout()) {
-			ReparentLayoutWidgets(layout, nativePage);
-			nativeLayout->addLayout(layout);
-			delete item;
-		} else {
-			nativeLayout->addItem(item);
-		}
-	}
-
-	auto *scroll = new QScrollArea(page);
-	scroll->setFrameShape(QFrame::NoFrame);
-	scroll->setWidgetResizable(true);
-	scroll->setWidget(nativePage);
-	return scroll;
-}
-
 QWidget *MovePageContentsToTab(QWidget *page, const QString &title, QTabWidget *&tabs)
 {
-	auto *scroll = MovePageContentsToScroll(page);
+	auto *scroll = OBSNativeSettingsPage::MoveContentsToScroll(page);
+	if (!scroll || !page || !page->layout()) {
+		return nullptr;
+	}
 	QLayout *pageLayout = page->layout();
 
 	tabs = new QTabWidget(page);
 	pageLayout->addWidget(tabs);
 	tabs->addTab(scroll, title);
-	return scroll->widget();
-}
-
-void MoveWidgetToTab(QTabWidget *tabs, QWidget *widget, const QString &title)
-{
-	if (!tabs || !widget) {
-		return;
-	}
-	if (QWidget *parent = widget->parentWidget(); parent && parent->layout()) {
-		parent->layout()->removeWidget(widget);
-	}
-	widget->setParent(tabs);
-	tabs->addTab(widget, title);
+	return scroll ? scroll->widget() : nullptr;
 }
 
 QToolButton *AddCornerButton(QTabWidget *tabs, const QString &toolTip)
@@ -547,41 +441,140 @@ struct OBSOutputRoutesSettings::Impl {
 	QTabWidget *destinationTabs = nullptr;
 	QTabWidget *outputTabs = nullptr;
 	QTabWidget *canvasTabs = nullptr;
-	QWidget *nativeOutputPage = nullptr;
-	QWidget *nativeVideoPage = nullptr;
+	QScrollArea *nativeStreamPage = nullptr;
+	QScrollArea *nativeVideoPage = nullptr;
+	QComboBox *outputMode = nullptr;
 	std::vector<QComboBox *> replayPrograms;
 	QString mainCanvasOriginalName;
 	QString mainCanvasDraftName;
 
 	std::vector<std::unique_ptr<DestinationUi>> destinationUis;
 	std::unique_ptr<DestinationUi> primaryDestinationUi;
+	QWidget *primaryDestinationExtras = nullptr;
 	Destination primaryDestination;
 	std::vector<std::unique_ptr<RouteUi>> routeUis;
 	std::vector<std::unique_ptr<CanvasUi>> canvasUis;
 	std::unique_ptr<CanvasUi> mainCanvasUi;
+
+	void UpdateOutputTabVisibility()
+	{
+		if (!outputTabs || !outputMode) {
+			return;
+		}
+
+		const int outputModeIndex = outputMode->currentIndex();
+		int firstVisibleTab = -1;
+		for (int index = 0; index < outputTabs->count(); ++index) {
+			QWidget *page = outputTabs->widget(index);
+			const QVariant nativeMode = page ? page->property("outputMode") : QVariant{};
+			const bool visible = !nativeMode.isValid() || nativeMode.toInt() == outputModeIndex;
+			outputTabs->setTabVisible(index, visible);
+			if (visible && firstVisibleTab < 0) {
+				firstVisibleTab = index;
+			}
+		}
+
+		const int currentIndex = outputTabs->currentIndex();
+		if (firstVisibleTab >= 0 && (currentIndex < 0 || !outputTabs->isTabVisible(currentIndex))) {
+			outputTabs->setCurrentIndex(firstVisibleTab);
+		}
+	}
+
+	void BuildUnifiedOutputTabs(QWidget *outputPage)
+	{
+		outputMode = outputPage->findChild<QComboBox *>(QStringLiteral("outputMode"));
+		auto *outputModePages = outputPage->findChild<QStackedWidget *>(QStringLiteral("outputModePages"));
+		auto *simplePage = outputPage->findChild<QWidget *>(QStringLiteral("easyOutputsPage"));
+		auto *advancedPage = outputPage->findChild<QWidget *>(QStringLiteral("advOutputsPage"));
+		auto *nativeTabs = outputPage->findChild<QTabWidget *>(QStringLiteral("advOutTabs"));
+
+		if (!outputModePages || !simplePage || !advancedPage || !nativeTabs) {
+			MovePageContentsToTab(outputPage, QTStr("Basic.Settings.Output"), outputTabs);
+			return;
+		}
+
+		QLayout *parentLayout = outputModePages->parentWidget() ? outputModePages->parentWidget()->layout() : nullptr;
+		const int originalIndex = parentLayout ? parentLayout->indexOf(outputModePages) : -1;
+		if (parentLayout) {
+			parentLayout->removeWidget(outputModePages);
+		}
+		outputModePages->hide();
+
+		outputTabs = new QTabWidget(outputPage);
+		if (parentLayout && originalIndex >= 0) {
+			parentLayout->insertWidget(originalIndex, outputTabs);
+		} else if (outputPage->layout()) {
+			outputPage->layout()->addWidget(outputTabs);
+		}
+
+		outputModePages->removeWidget(simplePage);
+		outputModePages->removeWidget(advancedPage);
+
+		auto addNativeTab = [this](QWidget *page, const QIcon &icon, const QString &title, int mode) {
+			if (!page) {
+				return;
+			}
+			page->setParent(outputTabs);
+			page->setProperty("outputMode", mode);
+			outputTabs->addTab(page, icon, title);
+		};
+
+		addNativeTab(simplePage, {}, QTStr("Basic.Settings.Output"), 0);
+		while (nativeTabs->count() > 0) {
+			const QString title = nativeTabs->tabText(0);
+			const QIcon icon = nativeTabs->tabIcon(0);
+			const QString toolTip = nativeTabs->tabToolTip(0);
+			const QString whatsThis = nativeTabs->tabWhatsThis(0);
+			QWidget *page = nativeTabs->widget(0);
+			nativeTabs->removeTab(0);
+			addNativeTab(page, icon, title, 1);
+			const int index = outputTabs->count() - 1;
+			outputTabs->setTabToolTip(index, toolTip);
+			outputTabs->setTabWhatsThis(index, whatsThis);
+		}
+		nativeTabs->hide();
+
+		if (outputMode) {
+			QObject::connect(outputMode, &QComboBox::currentIndexChanged, outputPage,
+					 [this](int) { UpdateOutputTabVisibility(); });
+		}
+		UpdateOutputTabVisibility();
+	}
+
+	void RemovePrimaryDestinationExtras()
+	{
+		if (!primaryDestinationExtras) {
+			return;
+		}
+		if (QWidget *parent = primaryDestinationExtras->parentWidget(); parent && parent->layout()) {
+			parent->layout()->removeWidget(primaryDestinationExtras);
+		}
+		delete primaryDestinationExtras;
+		primaryDestinationExtras = nullptr;
+	}
 
 	Impl(OBSBasic *main_, QWidget *streamPage, QWidget *outputPage, QWidget *videoPage,
 	     std::function<void()> changed)
 		: main(main_),
 		  changedCallback(std::move(changed))
 	{
-		QScrollArea *nativeStreamPage = MovePageContentsToScroll(streamPage);
+		nativeStreamPage = OBSNativeSettingsPage::MoveContentsToScroll(streamPage);
 		destinationTabs = new QTabWidget(streamPage);
 		streamPage->layout()->addWidget(destinationTabs);
-		MoveWidgetToTab(destinationTabs, nativeStreamPage, QTStr("Basic.Settings.Advanced"));
-		nativeOutputPage = MovePageContentsToTab(outputPage, QTStr("Basic.Settings.Output"), outputTabs);
-		nativeVideoPage = MovePageContentsToScroll(videoPage);
+		destinationTabs->addTab(nativeStreamPage, QTStr("OBSPro.Settings.Stream.Primary"));
+		BuildUnifiedOutputTabs(outputPage);
+		nativeVideoPage = OBSNativeSettingsPage::MoveContentsToScroll(videoPage);
 		canvasTabs = new QTabWidget(videoPage);
 		videoPage->layout()->addWidget(canvasTabs);
-		MoveWidgetToTab(canvasTabs, nativeVideoPage, QTStr("Basic.Settings.Advanced"));
 
-		auto addReplayProgram = [this](QWidget *parent, QFormLayout *form) {
-			if (!parent || !form) {
+		auto addReplayProgram = [this](QFormLayout *form) {
+			if (!form || !form->parentWidget()) {
 				return;
 			}
+			QWidget *parent = form->parentWidget();
 			auto *combo = new QComboBox(parent);
 			form->insertRow(
-				0, CreateNativeSettingsLabel(parent, QTStr("OBSPro.Settings.Replay.Source"), combo),
+				0, OBSNativeSettingsPage::CreateLabel(parent, QTStr("OBSPro.Settings.Replay.Source"), combo),
 				combo);
 			auto *description = new QLabel(QTStr("OBSPro.Settings.Replay.Description"), parent);
 			description->setWordWrap(true);
@@ -603,10 +596,8 @@ struct OBSOutputRoutesSettings::Impl {
 				MarkChanged();
 			});
 		};
-		addReplayProgram(nativeOutputPage,
-				 nativeOutputPage->findChild<QFormLayout *>(QStringLiteral("formLayout_24")));
-		addReplayProgram(nativeOutputPage,
-				 nativeOutputPage->findChild<QFormLayout *>(QStringLiteral("formLayout_30")));
+		addReplayProgram(outputPage->findChild<QFormLayout *>(QStringLiteral("formLayout_24")));
+		addReplayProgram(outputPage->findChild<QFormLayout *>(QStringLiteral("formLayout_30")));
 
 		QToolButton *addDestination =
 			AddCornerButton(destinationTabs, QTStr("OBSPro.Settings.Stream.AddDestination"));
@@ -652,7 +643,12 @@ struct OBSOutputRoutesSettings::Impl {
 			return;
 		}
 		if (!nativeId.isEmpty() && id == nativeId && tabs->count() > 0) {
-			tabs->setCurrentIndex(0);
+			for (int index = 0; index < tabs->count(); ++index) {
+				if (tabs->isTabVisible(index)) {
+					tabs->setCurrentIndex(index);
+					return;
+				}
+			}
 			return;
 		}
 		for (int index = 0; index < tabs->count(); ++index) {
@@ -1025,7 +1021,9 @@ struct OBSOutputRoutesSettings::Impl {
 			session->name = destination->name;
 			session->dynamicBitrateEnabled = destination->dynamicBitrateEnabled;
 		}
-		destination->service = ToStdString(ui.serviceType->currentData().toString());
+		if (ui.serviceType) {
+			destination->service = ToStdString(ui.serviceType->currentData().toString());
+		}
 		if (ui.properties) {
 			obs_data_t *settings = ui.properties->GetSettings();
 			destination->serviceSettingsJson = SettingsJson(settings);
@@ -1096,6 +1094,7 @@ struct OBSOutputRoutesSettings::Impl {
 		RemoveCustomTabs(destinationTabs, "outputDestinationId");
 		destinationUis.clear();
 		primaryDestinationUi.reset();
+		RemovePrimaryDestinationExtras();
 		if (Route *primary = PrimaryRoute()) {
 			BuildDestinationEditor(*primary, primaryDestination, true);
 		}
@@ -1110,45 +1109,63 @@ struct OBSOutputRoutesSettings::Impl {
 	{
 		auto ui = std::make_unique<DestinationUi>();
 		ui->id = QString::fromUtf8(destination.id.c_str());
-		ui->page = new QWidget(destinationTabs);
-		ui->page->setProperty("outputDestinationId", ui->id);
+		if (primary) {
+			ui->page = nativeStreamPage;
+			primaryDestinationExtras = new QWidget(nativeStreamPage->widget());
+		} else {
+			ui->page = new QWidget(destinationTabs);
+			ui->page->setProperty("outputDestinationId", ui->id);
+		}
 		QWidget *contents = nullptr;
-		auto *layout = CreateNativeSettingsPage(ui->page, contents);
+		QVBoxLayout *layout = nullptr;
+		if (primary) {
+			OBSNativeSettingsPage page(primaryDestinationExtras, false);
+			contents = page.Contents();
+			layout = page.Layout();
+			nativeStreamPage->widget()->layout()->addWidget(primaryDestinationExtras);
+		} else {
+			OBSNativeSettingsPage page(ui->page);
+			contents = page.Contents();
+			layout = page.Layout();
+		}
 		auto *settings = new QGroupBox(QTStr("Basic.Settings.Stream.Destination"), contents);
 		auto *form = new QFormLayout(settings);
-		ConfigureNativeSettingsForm(form);
+		OBSNativeSettingsPage::ConfigureForm(form);
 		layout->addWidget(settings);
 
 		ui->enabled = new QCheckBox(QTStr("OBSPro.OutputRoutes.Enabled"), settings);
 		const auto *session = FindSession(destination.sessionId);
 		ui->enabled->setChecked(session ? session->enabled : destination.enabled);
-		AddNativeSettingsRow(form, settings, QString(), ui->enabled);
+		OBSNativeSettingsPage::AddRow(form, settings, QString(), ui->enabled);
 		ui->name = new QLineEdit(QString::fromUtf8(destination.name.c_str()), settings);
-		AddNativeSettingsRow(form, settings, QTStr("OBSPro.OutputRoutes.Name"), ui->name);
+		OBSNativeSettingsPage::AddRow(form, settings, QTStr("OBSPro.OutputRoutes.Name"), ui->name);
 		ui->session = new QComboBox(settings);
 		PopulateSessionCombo(ui->session, destination, route.id);
-		AddNativeSettingsRow(form, settings, QTStr("OBSPro.Settings.Session.PlatformSession"), ui->session);
+		OBSNativeSettingsPage::AddRow(form, settings, QTStr("OBSPro.Settings.Session.PlatformSession"), ui->session);
 		ui->output = new QComboBox(settings);
 		PopulateOutputCombo(ui->output, QString::fromUtf8(route.id.c_str()));
 		ui->output->setEnabled(!primary);
-		AddNativeSettingsRow(form, settings, QTStr("OBSPro.Settings.Stream.EncodedOutput"), ui->output);
-		ui->serviceType = new QComboBox(settings);
-		PopulateServiceCombo(ui->serviceType, destination.service);
-		ui->serviceType->setEnabled(!primary);
-		AddNativeSettingsRow(form, settings, QTStr("Basic.AutoConfig.StreamPage.Service"), ui->serviceType);
+		OBSNativeSettingsPage::AddRow(form, settings, QTStr("OBSPro.Settings.Stream.EncodedOutput"), ui->output);
+		if (!primary) {
+			ui->serviceType = new QComboBox(settings);
+			PopulateServiceCombo(ui->serviceType, destination.service);
+			OBSNativeSettingsPage::AddRow(form, settings, QTStr("Basic.AutoConfig.StreamPage.Service"), ui->serviceType);
+		}
 		ui->priority = new QSpinBox(settings);
 		ui->priority->setRange(0, 999);
 		ui->priority->setValue(static_cast<int>(destination.priority));
-		AddNativeSettingsRow(form, settings, QTStr("OBSPro.OutputRoutes.Priority"), ui->priority);
+		OBSNativeSettingsPage::AddRow(form, settings, QTStr("OBSPro.OutputRoutes.Priority"), ui->priority);
 		ui->dynamicBitrate = new QCheckBox(QTStr("Basic.Settings.Output.DynamicBitrate"), settings);
 		ui->dynamicBitrate->setChecked(session ? session->dynamicBitrateEnabled
 						       : destination.dynamicBitrateEnabled);
-		AddNativeSettingsRow(form, settings, QString(), ui->dynamicBitrate);
+		OBSNativeSettingsPage::AddRow(form, settings, QString(), ui->dynamicBitrate);
 
-		auto *properties = new QGroupBox(QTStr("OBSPro.Settings.Stream.ServiceSettings"), contents);
-		ui->propertiesLayout = new QVBoxLayout(properties);
-		ui->propertiesLayout->setContentsMargins(9, 2, 9, 9);
-		layout->addWidget(properties);
+		if (!primary) {
+			auto *properties = new QGroupBox(QTStr("OBSPro.Settings.Stream.ServiceSettings"), contents);
+			ui->propertiesLayout = new QVBoxLayout(properties);
+			ui->propertiesLayout->setContentsMargins(9, 2, 9, 9);
+			layout->addWidget(properties);
+		}
 		layout->addStretch();
 		auto *sessionControls = new QWidget(contents);
 		auto *sessionControlsLayout = new QHBoxLayout(sessionControls);
@@ -1211,18 +1228,20 @@ struct OBSOutputRoutesSettings::Impl {
 			RefreshAssignedDestinationLabels();
 			MarkChanged();
 		});
-		QObject::connect(ui->serviceType, &QComboBox::currentIndexChanged, ui->page, [this, raw](int) {
-			auto [currentRoute, current] = FindDestination(raw->id);
-			if (!currentRoute || !current) {
-				return;
-			}
-			current->service = ToStdString(raw->serviceType->currentData().toString());
-			current->serviceSettingsJson.clear();
-			current->server.clear();
-			current->streamKey.clear();
-			CreateServiceProperties(*raw);
-			MarkChanged();
-		});
+		if (ui->serviceType) {
+			QObject::connect(ui->serviceType, &QComboBox::currentIndexChanged, ui->page, [this, raw](int) {
+				auto [currentRoute, current] = FindDestination(raw->id);
+				if (!currentRoute || !current) {
+					return;
+				}
+				current->service = ToStdString(raw->serviceType->currentData().toString());
+				current->serviceSettingsJson.clear();
+				current->server.clear();
+				current->streamKey.clear();
+				CreateServiceProperties(*raw);
+				MarkChanged();
+			});
+		}
 		QObject::connect(remove, &QPushButton::clicked, ui->page,
 				 [this, id = ui->id]() { RemoveDestination(id); });
 		QObject::connect(start, &QPushButton::clicked, ui->page, [this, raw]() {
@@ -1235,8 +1254,7 @@ struct OBSOutputRoutesSettings::Impl {
 		const QString title = QString::fromUtf8(destination.name.c_str());
 		if (primary) {
 			primaryDestinationUi = std::move(ui);
-			destinationTabs->insertTab(0, primaryDestinationUi->page, title);
-			CreateServiceProperties(*primaryDestinationUi);
+			destinationTabs->setTabText(destinationTabs->indexOf(primaryDestinationUi->page), title);
 		} else {
 			destinationUis.emplace_back(std::move(ui));
 			destinationTabs->addTab(destinationUis.back()->page, title);
@@ -1348,7 +1366,7 @@ struct OBSOutputRoutesSettings::Impl {
 
 			if (video) {
 				auto *form = new QFormLayout;
-				ConfigureNativeSettingsForm(form);
+				OBSNativeSettingsPage::ConfigureForm(form);
 				ui.videoBitrateOverride = new QSpinBox(ui.page);
 				ui.videoBitrateOverride->setRange(0, 1000000);
 				ui.videoBitrateOverride->setSingleStep(100);
@@ -1356,7 +1374,7 @@ struct OBSOutputRoutesSettings::Impl {
 				ui.videoBitrateOverride->setSpecialValueText(
 					QTStr("OBSPro.Settings.Output.InheritBitrate"));
 				ui.videoBitrateOverride->setValue(static_cast<int>(route->videoBitrateOverride));
-				form->addRow(CreateNativeSettingsLabel(ui.page,
+				form->addRow(OBSNativeSettingsPage::CreateLabel(ui.page,
 								       QTStr("Basic.Settings.Output.VideoBitrate"),
 								       ui.videoBitrateOverride),
 					     ui.videoBitrateOverride);
@@ -1408,7 +1426,7 @@ struct OBSOutputRoutesSettings::Impl {
 	{
 		RemoveCustomTabs(outputTabs, "outputRouteId");
 		routeUis.clear();
-		int insertIndex = std::min(1, outputTabs->count());
+		int insertIndex = outputTabs->count();
 		for (Route &route : routes.routes) {
 			if (route.primary) {
 				continue;
@@ -1417,28 +1435,29 @@ struct OBSOutputRoutesSettings::Impl {
 			ui->id = QString::fromUtf8(route.id.c_str());
 			ui->page = new QWidget(outputTabs);
 			ui->page->setProperty("outputRouteId", ui->id);
-			QWidget *contents = nullptr;
-			auto *contentsLayout = CreateNativeSettingsPage(ui->page, contents);
+			OBSNativeSettingsPage page(ui->page);
+			QWidget *contents = page.Contents();
+			auto *contentsLayout = page.Layout();
 			auto *settings = new QGroupBox(QTStr("Basic.Settings.Output.Adv.Streaming.Settings"), contents);
 			auto *form = new QFormLayout(settings);
-			ConfigureNativeSettingsForm(form);
+			OBSNativeSettingsPage::ConfigureForm(form);
 			contentsLayout->addWidget(settings);
 
 			ui->enabled = new QCheckBox(QTStr("OBSPro.OutputRoutes.Enabled"), settings);
 			ui->enabled->setChecked(route.enabled);
-			AddNativeSettingsRow(form, settings, QString(), ui->enabled);
+			OBSNativeSettingsPage::AddRow(form, settings, QString(), ui->enabled);
 			ui->name = new QLineEdit(QString::fromUtf8(route.name.c_str()), settings);
-			AddNativeSettingsRow(form, settings, QTStr("OBSPro.OutputRoutes.Name"), ui->name);
+			OBSNativeSettingsPage::AddRow(form, settings, QTStr("OBSPro.OutputRoutes.Name"), ui->name);
 			ui->canvas = new QComboBox(settings);
 			PopulateCanvasCombo(ui->canvas, route.canvas);
-			AddNativeSettingsRow(form, settings, QTStr("OBSPro.OutputRoutes.Canvas"), ui->canvas);
+			OBSNativeSettingsPage::AddRow(form, settings, QTStr("OBSPro.OutputRoutes.Canvas"), ui->canvas);
 			ui->videoEncoder = new QComboBox(settings);
 			PopulateEncoderCombo(ui->videoEncoder, OBS_ENCODER_VIDEO, route.videoEncoderId);
-			AddNativeSettingsRow(form, settings, QTStr("Basic.Settings.Output.Encoder.Video"),
+			OBSNativeSettingsPage::AddRow(form, settings, QTStr("Basic.Settings.Output.Encoder.Video"),
 					     ui->videoEncoder);
 			ui->audioEncoder = new QComboBox(settings);
 			PopulateEncoderCombo(ui->audioEncoder, OBS_ENCODER_AUDIO, route.audioEncoderId);
-			AddNativeSettingsRow(form, settings, QTStr("Basic.Settings.Output.Encoder.Audio"),
+			OBSNativeSettingsPage::AddRow(form, settings, QTStr("Basic.Settings.Output.Encoder.Audio"),
 					     ui->audioEncoder);
 			auto *audioTracks = new QWidget(settings);
 			auto *audioTracksLayout = new QHBoxLayout(audioTracks);
@@ -1451,7 +1470,7 @@ struct OBSOutputRoutesSettings::Impl {
 				button->setChecked(route.audioMix == static_cast<uint32_t>(mix));
 			}
 			audioTracksLayout->addStretch();
-			AddNativeSettingsRow(form, settings, QTStr("OBSPro.Settings.Output.AudioMix"), audioTracks);
+			OBSNativeSettingsPage::AddRow(form, settings, QTStr("OBSPro.Settings.Output.AudioMix"), audioTracks);
 			ui->failoverMode = new QComboBox(settings);
 			ui->failoverMode->addItem(QTStr("OBSPro.Settings.Output.Parallel"),
 						  static_cast<int>(FailoverMode::ClientParallel));
@@ -1459,7 +1478,7 @@ struct OBSOutputRoutesSettings::Impl {
 						  static_cast<int>(FailoverMode::ClientSequential));
 			ui->failoverMode->setCurrentIndex(
 				std::max(0, ui->failoverMode->findData(static_cast<int>(route.failoverMode))));
-			AddNativeSettingsRow(form, settings, QTStr("OBSPro.Settings.Output.DeliveryMode"),
+			OBSNativeSettingsPage::AddRow(form, settings, QTStr("OBSPro.Settings.Output.DeliveryMode"),
 					     ui->failoverMode);
 
 			auto *videoGroup =
@@ -1714,28 +1733,97 @@ struct OBSOutputRoutesSettings::Impl {
 		RemoveCustomTabs(canvasTabs, "canvasDraftId");
 		canvasUis.clear();
 		mainCanvasUi.reset();
-		BuildCanvasEditor(mainCanvasDraft, true);
+		BuildNativeMainCanvasEditor();
 		for (CanvasDraft &draft : canvasDrafts) {
-			BuildCanvasEditor(draft, false);
+			BuildCanvasEditor(draft);
 		}
 		RefreshRouteCanvasCombos();
 	}
 
-	void BuildCanvasEditor(CanvasDraft &draft, bool isMain)
+	void BuildNativeMainCanvasEditor()
+	{
+		if (!nativeVideoPage || !canvasTabs) {
+			return;
+		}
+
+		auto ui = std::make_unique<CanvasUi>();
+		ui->id = QStringLiteral("main");
+		ui->page = nativeVideoPage;
+		ui->baseResolution = nativeVideoPage->findChild<QComboBox *>(QStringLiteral("baseResolution"));
+		ui->baseAspect = nativeVideoPage->findChild<QLabel *>(QStringLiteral("baseAspect"));
+		ui->outputResolution = nativeVideoPage->findChild<QComboBox *>(QStringLiteral("outputResolution"));
+		ui->outputAspect = nativeVideoPage->findChild<QLabel *>(QStringLiteral("scaledAspect"));
+		ui->downscaleFilter = nativeVideoPage->findChild<QComboBox *>(QStringLiteral("downscaleFilter"));
+		ui->fpsType = nativeVideoPage->findChild<QComboBox *>(QStringLiteral("fpsType"));
+		ui->fpsTypes = nativeVideoPage->findChild<QStackedWidget *>(QStringLiteral("fpsTypes"));
+		ui->fpsCommon = nativeVideoPage->findChild<QComboBox *>(QStringLiteral("fpsCommon"));
+		ui->fpsInteger = nativeVideoPage->findChild<QSpinBox *>(QStringLiteral("fpsInteger"));
+		ui->fpsNumerator = nativeVideoPage->findChild<QSpinBox *>(QStringLiteral("fpsNumerator"));
+		ui->fpsDenominator = nativeVideoPage->findChild<QSpinBox *>(QStringLiteral("fpsDenominator"));
+
+		if (!ui->baseResolution || !ui->outputResolution || !ui->downscaleFilter || !ui->fpsType ||
+		    !ui->fpsTypes || !ui->fpsCommon || !ui->fpsInteger || !ui->fpsNumerator || !ui->fpsDenominator) {
+			return;
+		}
+
+		QWidget *contents = nativeVideoPage->widget();
+		auto *contentsLayout = contents ? qobject_cast<QVBoxLayout *>(contents->layout()) : nullptr;
+		if (!contents || !contentsLayout) {
+			return;
+		}
+
+		ui->name = contents->findChild<QLineEdit *>(QStringLiteral("mainCanvasName"));
+		if (!ui->name) {
+			auto *identity = new QGroupBox(QTStr("OBSPro.Settings.Canvas.Main"), contents);
+			identity->setObjectName(QStringLiteral("mainCanvasIdentity"));
+			auto *form = new QFormLayout(identity);
+			OBSNativeSettingsPage::ConfigureForm(form);
+			ui->name = new QLineEdit(mainCanvasDraftName, identity);
+			ui->name->setObjectName(QStringLiteral("mainCanvasName"));
+			OBSNativeSettingsPage::AddRow(form, identity, QTStr("OBSPro.OutputRoutes.Name"), ui->name);
+			contentsLayout->addWidget(identity);
+		} else {
+			ui->name->setText(mainCanvasDraftName);
+		}
+
+		if (!ui->name->property("obsProCanvasNameConnected").toBool()) {
+			QObject::connect(ui->name, &QLineEdit::textChanged, ui->page, [this](const QString &text) {
+				mainCanvasDraftName = text.trimmed();
+				const int tabIndex = canvasTabs->indexOf(nativeVideoPage);
+				if (tabIndex >= 0) {
+					canvasTabs->setTabText(tabIndex, mainCanvasDraftName);
+				}
+				RefreshRouteCanvasCombos();
+				MarkChanged();
+			});
+			ui->name->setProperty("obsProCanvasNameConnected", true);
+		}
+
+		const int tabIndex = canvasTabs->indexOf(nativeVideoPage);
+		if (tabIndex < 0) {
+			canvasTabs->addTab(nativeVideoPage, mainCanvasDraftName);
+		} else {
+			canvasTabs->setTabText(tabIndex, mainCanvasDraftName);
+		}
+		mainCanvasUi = std::move(ui);
+	}
+
+	void BuildCanvasEditor(CanvasDraft &draft)
 	{
 		auto ui = std::make_unique<CanvasUi>();
 		ui->id = draft.id;
 		ui->page = new QWidget(canvasTabs);
 		ui->page->setProperty("canvasDraftId", draft.id);
-		QWidget *contents = nullptr;
-		auto *layout = CreateNativeSettingsPage(ui->page, contents);
+		OBSNativeSettingsPage page(ui->page);
+		QWidget *contents = page.Contents();
+		auto *layout = page.Layout();
 		auto *general = new QGroupBox(QTStr("Basic.Settings.General"), contents);
 		general->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
 		auto *form = new QFormLayout(general);
-		ConfigureNativeSettingsForm(form);
+		OBSNativeSettingsPage::ConfigureForm(form);
 		layout->addWidget(general);
 		ui->name = new QLineEdit(draft.name, general);
-		AddNativeSettingsRow(form, general, QTStr("OBSPro.OutputRoutes.Name"), ui->name);
+		OBSNativeSettingsPage::AddRow(form, general, QTStr("OBSPro.OutputRoutes.Name"), ui->name);
 
 		auto *baseResolutionLayout = new QHBoxLayout;
 		baseResolutionLayout->setContentsMargins(0, 0, 0, 0);
@@ -1761,16 +1849,17 @@ struct OBSOutputRoutesSettings::Impl {
 			QRegularExpression(QStringLiteral("\\d{2,5}[xX]\\d{2,5}")), general);
 		ui->baseResolution->lineEdit()->setValidator(validator);
 		ui->outputResolution->lineEdit()->setValidator(validator);
-		form->addRow(CreateNativeSettingsLabel(general, QTStr("Basic.Settings.Video.BaseResolution"),
+		form->addRow(OBSNativeSettingsPage::CreateLabel(general, QTStr("Basic.Settings.Video.BaseResolution"),
 						       ui->baseResolution),
 			     baseResolutionLayout);
-		form->addRow(CreateNativeSettingsLabel(general, QTStr("Basic.Settings.Video.ScaledResolution"),
+		form->addRow(OBSNativeSettingsPage::CreateLabel(general, QTStr("Basic.Settings.Video.ScaledResolution"),
 						       ui->outputResolution),
 			     outputResolutionLayout);
 		ui->downscaleFilter = new QComboBox(general);
 		PopulateCanvasDownscaleFilter(ui->downscaleFilter, draft.info, ui->baseResolution->currentText(),
 					      ui->outputResolution->currentText());
-		AddNativeSettingsRow(form, general, QTStr("Basic.Settings.Video.DownscaleFilter"), ui->downscaleFilter);
+		OBSNativeSettingsPage::AddRow(form, general, QTStr("Basic.Settings.Video.DownscaleFilter"),
+						 ui->downscaleFilter);
 
 		ui->fpsType = new QComboBox(general);
 		ui->fpsType->addItem(QTStr("Basic.Settings.Video.FPSCommon"));
@@ -1835,20 +1924,18 @@ struct OBSOutputRoutesSettings::Impl {
 		}
 		ui->fpsTypes->setCurrentIndex(ui->fpsType->currentIndex());
 		form->addRow(ui->fpsType, ui->fpsTypes);
-		if (!draft.existing && !isMain) {
+		if (!draft.existing) {
 			auto *mode = new QLabel(CanvasModeText(draft.creationMode), general);
 			mode->setWordWrap(true);
-			AddNativeSettingsRow(form, general, QTStr("OBSPro.Settings.Canvas.CreationMode"), mode);
+			OBSNativeSettingsPage::AddRow(form, general, QTStr("OBSPro.Settings.Canvas.CreationMode"), mode);
 		}
 		auto *description = new QLabel(QTStr("OBSPro.Settings.Canvas.SceneSetDescription"), contents);
 		description->setWordWrap(true);
 		layout->addWidget(description);
 		layout->addStretch();
 		QPushButton *remove = nullptr;
-		if (!isMain) {
-			remove = new QPushButton(QTStr("OBSPro.Settings.Canvas.Remove"), contents);
-			layout->addWidget(remove, 0, Qt::AlignRight);
-		}
+		remove = new QPushButton(QTStr("OBSPro.Settings.Canvas.Remove"), contents);
+		layout->addWidget(remove, 0, Qt::AlignRight);
 
 		CanvasUi *raw = ui.get();
 		QObject::connect(ui->name, &QLineEdit::textChanged, ui->page, [this, raw](const QString &text) {
@@ -1910,15 +1997,10 @@ struct OBSOutputRoutesSettings::Impl {
 			SyncCanvasUi(*raw);
 			MarkChanged();
 		});
-		if (isMain) {
-			mainCanvasUi = std::move(ui);
-		} else {
-			QObject::connect(remove, &QPushButton::clicked, ui->page,
-					 [this, id = ui->id]() { RemoveCanvas(id); });
-			canvasUis.emplace_back(std::move(ui));
-		}
-
-		canvasTabs->addTab(isMain ? mainCanvasUi->page : canvasUis.back()->page, draft.name);
+		QObject::connect(remove, &QPushButton::clicked, ui->page,
+				 [this, id = ui->id]() { RemoveCanvas(id); });
+		canvasTabs->addTab(ui->page, draft.name);
+		canvasUis.emplace_back(std::move(ui));
 	}
 
 	QString UniqueCanvasName() const
@@ -2380,50 +2462,18 @@ struct OBSOutputRoutesSettings::Impl {
 
 	bool ApplyPrimaryServiceSettings(QString &error)
 	{
-		obs_service_t *service = main->GetService();
-		if (!service) {
-			error = QTStr("OBSPro.Settings.Stream.ServiceUnavailable");
-			return false;
-		}
-		if (primaryDestination.service != obs_service_get_type(service)) {
-			/* The native Stream page owns service-type replacement. Let its normal
-			 * SaveStream1Settings path commit that change after this model saves. */
-			return true;
-		}
-		if (primaryDestination.serviceSettingsJson.empty()) {
-			error = QTStr("OBSPro.Settings.Stream.InvalidServiceSettings");
-			return false;
-		}
-		OBSDataAutoRelease defaults = obs_service_defaults(primaryDestination.service.c_str());
-		OBSDataAutoRelease settings = SettingsFromJson(primaryDestination.serviceSettingsJson, defaults);
-		if (!settings) {
-			error = QTStr("OBSPro.Settings.Stream.InvalidServiceSettings");
-			return false;
-		}
-		obs_service_update(service, settings);
-		main->SaveService();
+		/* The native Primary Stream page remains the source of truth for the
+		 * platform, account, server, key, and service-specific settings. Its
+		 * normal SaveStream1Settings path runs after this model is saved. */
+		Q_UNUSED(error);
 		return true;
 	}
 
 	bool ValidatePrimaryServiceSettings(QString &error) const
 	{
-		obs_service_t *service = main->GetService();
-		if (!service) {
-			error = QTStr("OBSPro.Settings.Stream.ServiceUnavailable");
-			return false;
-		}
-		if (primaryDestination.service != obs_service_get_type(service)) {
-			return true;
-		}
-		if (primaryDestination.serviceSettingsJson.empty()) {
-			error = QTStr("OBSPro.Settings.Stream.InvalidServiceSettings");
-			return false;
-		}
-		OBSDataAutoRelease settings = obs_data_create_from_json(primaryDestination.serviceSettingsJson.c_str());
-		if (!settings) {
-			error = QTStr("OBSPro.Settings.Stream.InvalidServiceSettings");
-			return false;
-		}
+		/* Validation of the native service fields is still performed by OBS'
+		 * existing stream-settings path. */
+		Q_UNUSED(error);
 		return true;
 	}
 

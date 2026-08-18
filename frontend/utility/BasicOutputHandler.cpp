@@ -20,6 +20,21 @@ using namespace std;
 extern bool EncoderAvailable(const char *encoder);
 extern std::string DeserializeConfigText(const char *text);
 
+namespace {
+
+bool IsPlatformSessionActive(const OBS::Output::PlatformSession &session)
+{
+	const auto state = session.State();
+	const bool outputActive = session.Output() && obs_output_active(session.Output());
+	return state == OBS::Output::SessionRuntimeState::Starting ||
+	       ((state == OBS::Output::SessionRuntimeState::Active ||
+		 state == OBS::Output::SessionRuntimeState::Stopping) &&
+		outputActive) ||
+	       outputActive;
+}
+
+} // namespace
+
 volatile bool streaming_active = false;
 volatile bool recording_active = false;
 volatile bool recording_paused = false;
@@ -355,14 +370,8 @@ void BasicOutputHandler::UpdateAggregateStreamingState(int code, std::string_vie
 	bool anySessionActive = outputRoutes.Active();
 	if (!anySessionActive) {
 		anySessionActive = std::any_of(
-			platformSessionRuntimes.begin(), platformSessionRuntimes.end(), [](const auto &session) {
-				const auto state = session->State();
-				const bool outputActive = session->Output() && obs_output_active(session->Output());
-				return state == OBS::Output::SessionRuntimeState::Starting ||
-				       state == OBS::Output::SessionRuntimeState::Active ||
-				       (state == OBS::Output::SessionRuntimeState::Stopping && outputActive) ||
-				       outputActive;
-			});
+			platformSessionRuntimes.begin(), platformSessionRuntimes.end(),
+			[](const auto &session) { return IsPlatformSessionActive(*session); });
 	}
 
 	if (anySessionActive) {
