@@ -40,8 +40,8 @@ enum class RuntimeState {
 
 inline bool IsRuntimeActive(RuntimeState state, bool outputActive)
 {
-	return state == RuntimeState::Starting || state == RuntimeState::Active ||
-	       (state == RuntimeState::Stopping && outputActive) || outputActive;
+	return state == RuntimeState::Starting ||
+	       ((state == RuntimeState::Active || state == RuntimeState::Stopping) && outputActive) || outputActive;
 }
 
 struct RuntimeOptions {

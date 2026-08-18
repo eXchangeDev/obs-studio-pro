@@ -602,6 +602,14 @@ void Runtime::Stop(bool force)
 			destination->intentionalStop.store(true);
 			const RuntimeState state = destination->state.load();
 			if (!obs_output_active(destination->output) && state != RuntimeState::Starting) {
+				if (state == RuntimeState::Active || state == RuntimeState::Stopping) {
+					destination->state.store(RuntimeState::Idle);
+					{
+						std::lock_guard lock(impl->mutex);
+						destination->lastError.clear();
+					}
+					impl->NotifyStateChanged(*destination);
+				}
 				continue;
 			}
 			destination->state.store(RuntimeState::Stopping);
@@ -634,6 +642,14 @@ void Runtime::StopSession(std::string_view sessionId, bool force)
 			destination->intentionalStop.store(true);
 			const RuntimeState state = destination->state.load();
 			if (!obs_output_active(destination->output) && state != RuntimeState::Starting) {
+				if (state == RuntimeState::Active || state == RuntimeState::Stopping) {
+					destination->state.store(RuntimeState::Idle);
+					{
+						std::lock_guard lock(impl->mutex);
+						destination->lastError.clear();
+					}
+					impl->NotifyStateChanged(*destination);
+				}
 				continue;
 			}
 			destination->state.store(RuntimeState::Stopping);

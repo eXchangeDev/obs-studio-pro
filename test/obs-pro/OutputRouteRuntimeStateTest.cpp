@@ -13,7 +13,8 @@ int main()
 
 	CHECK(!IsRuntimeActive(RuntimeState::Idle, false));
 	CHECK(IsRuntimeActive(RuntimeState::Starting, false));
-	CHECK(IsRuntimeActive(RuntimeState::Active, false));
+	CHECK(!IsRuntimeActive(RuntimeState::Active, false));
+	CHECK(IsRuntimeActive(RuntimeState::Active, true));
 	CHECK(IsRuntimeActive(RuntimeState::Stopping, true));
 	CHECK(!IsRuntimeActive(RuntimeState::Stopping, false));
 	CHECK(IsRuntimeActive(RuntimeState::Failed, true));
