@@ -28,6 +28,7 @@
 #include <util/config-file.h>
 
 #include <QAbstractItemModel>
+#include <QBoxLayout>
 #include <QButtonGroup>
 #include <QCheckBox>
 #include <QComboBox>
@@ -493,7 +494,8 @@ struct OBSOutputRoutesSettings::Impl {
 			return;
 		}
 
-		QLayout *parentLayout = outputModePages->parentWidget() ? outputModePages->parentWidget()->layout() : nullptr;
+		QLayout *parentLayout = outputModePages->parentWidget() ? outputModePages->parentWidget()->layout()
+									: nullptr;
 		const int originalIndex = parentLayout ? parentLayout->indexOf(outputModePages) : -1;
 		if (parentLayout) {
 			parentLayout->removeWidget(outputModePages);
@@ -501,8 +503,8 @@ struct OBSOutputRoutesSettings::Impl {
 		outputModePages->hide();
 
 		outputTabs = new QTabWidget(outputPage);
-		if (parentLayout && originalIndex >= 0) {
-			parentLayout->insertWidget(originalIndex, outputTabs);
+		if (auto *boxLayout = qobject_cast<QBoxLayout *>(parentLayout); boxLayout && originalIndex >= 0) {
+			boxLayout->insertWidget(originalIndex, outputTabs);
 		} else if (outputPage->layout()) {
 			outputPage->layout()->addWidget(outputTabs);
 		}
@@ -573,9 +575,10 @@ struct OBSOutputRoutesSettings::Impl {
 			}
 			QWidget *parent = form->parentWidget();
 			auto *combo = new QComboBox(parent);
-			form->insertRow(
-				0, OBSNativeSettingsPage::CreateLabel(parent, QTStr("OBSPro.Settings.Replay.Source"), combo),
-				combo);
+			form->insertRow(0,
+					OBSNativeSettingsPage::CreateLabel(
+						parent, QTStr("OBSPro.Settings.Replay.Source"), combo),
+					combo);
 			auto *description = new QLabel(QTStr("OBSPro.Settings.Replay.Description"), parent);
 			description->setWordWrap(true);
 			form->insertRow(1, QString(), description);
@@ -1141,15 +1144,18 @@ struct OBSOutputRoutesSettings::Impl {
 		OBSNativeSettingsPage::AddRow(form, settings, QTStr("OBSPro.OutputRoutes.Name"), ui->name);
 		ui->session = new QComboBox(settings);
 		PopulateSessionCombo(ui->session, destination, route.id);
-		OBSNativeSettingsPage::AddRow(form, settings, QTStr("OBSPro.Settings.Session.PlatformSession"), ui->session);
+		OBSNativeSettingsPage::AddRow(form, settings, QTStr("OBSPro.Settings.Session.PlatformSession"),
+					      ui->session);
 		ui->output = new QComboBox(settings);
 		PopulateOutputCombo(ui->output, QString::fromUtf8(route.id.c_str()));
 		ui->output->setEnabled(!primary);
-		OBSNativeSettingsPage::AddRow(form, settings, QTStr("OBSPro.Settings.Stream.EncodedOutput"), ui->output);
+		OBSNativeSettingsPage::AddRow(form, settings, QTStr("OBSPro.Settings.Stream.EncodedOutput"),
+					      ui->output);
 		if (!primary) {
 			ui->serviceType = new QComboBox(settings);
 			PopulateServiceCombo(ui->serviceType, destination.service);
-			OBSNativeSettingsPage::AddRow(form, settings, QTStr("Basic.AutoConfig.StreamPage.Service"), ui->serviceType);
+			OBSNativeSettingsPage::AddRow(form, settings, QTStr("Basic.AutoConfig.StreamPage.Service"),
+						      ui->serviceType);
 		}
 		ui->priority = new QSpinBox(settings);
 		ui->priority->setRange(0, 999);
@@ -1374,9 +1380,9 @@ struct OBSOutputRoutesSettings::Impl {
 				ui.videoBitrateOverride->setSpecialValueText(
 					QTStr("OBSPro.Settings.Output.InheritBitrate"));
 				ui.videoBitrateOverride->setValue(static_cast<int>(route->videoBitrateOverride));
-				form->addRow(OBSNativeSettingsPage::CreateLabel(ui.page,
-								       QTStr("Basic.Settings.Output.VideoBitrate"),
-								       ui.videoBitrateOverride),
+				form->addRow(OBSNativeSettingsPage::CreateLabel(
+						     ui.page, QTStr("Basic.Settings.Output.VideoBitrate"),
+						     ui.videoBitrateOverride),
 					     ui.videoBitrateOverride);
 				layout->addLayout(form);
 				QObject::connect(ui.videoBitrateOverride, &QSpinBox::valueChanged, ui.page,
@@ -1454,11 +1460,11 @@ struct OBSOutputRoutesSettings::Impl {
 			ui->videoEncoder = new QComboBox(settings);
 			PopulateEncoderCombo(ui->videoEncoder, OBS_ENCODER_VIDEO, route.videoEncoderId);
 			OBSNativeSettingsPage::AddRow(form, settings, QTStr("Basic.Settings.Output.Encoder.Video"),
-					     ui->videoEncoder);
+						      ui->videoEncoder);
 			ui->audioEncoder = new QComboBox(settings);
 			PopulateEncoderCombo(ui->audioEncoder, OBS_ENCODER_AUDIO, route.audioEncoderId);
 			OBSNativeSettingsPage::AddRow(form, settings, QTStr("Basic.Settings.Output.Encoder.Audio"),
-					     ui->audioEncoder);
+						      ui->audioEncoder);
 			auto *audioTracks = new QWidget(settings);
 			auto *audioTracksLayout = new QHBoxLayout(audioTracks);
 			audioTracksLayout->setContentsMargins(0, 0, 0, 0);
@@ -1470,7 +1476,8 @@ struct OBSOutputRoutesSettings::Impl {
 				button->setChecked(route.audioMix == static_cast<uint32_t>(mix));
 			}
 			audioTracksLayout->addStretch();
-			OBSNativeSettingsPage::AddRow(form, settings, QTStr("OBSPro.Settings.Output.AudioMix"), audioTracks);
+			OBSNativeSettingsPage::AddRow(form, settings, QTStr("OBSPro.Settings.Output.AudioMix"),
+						      audioTracks);
 			ui->failoverMode = new QComboBox(settings);
 			ui->failoverMode->addItem(QTStr("OBSPro.Settings.Output.Parallel"),
 						  static_cast<int>(FailoverMode::ClientParallel));
@@ -1479,7 +1486,7 @@ struct OBSOutputRoutesSettings::Impl {
 			ui->failoverMode->setCurrentIndex(
 				std::max(0, ui->failoverMode->findData(static_cast<int>(route.failoverMode))));
 			OBSNativeSettingsPage::AddRow(form, settings, QTStr("OBSPro.Settings.Output.DeliveryMode"),
-					     ui->failoverMode);
+						      ui->failoverMode);
 
 			auto *videoGroup =
 				new QGroupBox(QTStr("OBSPro.Settings.Output.VideoEncoderSettings"), contents);
@@ -1850,16 +1857,16 @@ struct OBSOutputRoutesSettings::Impl {
 		ui->baseResolution->lineEdit()->setValidator(validator);
 		ui->outputResolution->lineEdit()->setValidator(validator);
 		form->addRow(OBSNativeSettingsPage::CreateLabel(general, QTStr("Basic.Settings.Video.BaseResolution"),
-						       ui->baseResolution),
+								ui->baseResolution),
 			     baseResolutionLayout);
 		form->addRow(OBSNativeSettingsPage::CreateLabel(general, QTStr("Basic.Settings.Video.ScaledResolution"),
-						       ui->outputResolution),
+								ui->outputResolution),
 			     outputResolutionLayout);
 		ui->downscaleFilter = new QComboBox(general);
 		PopulateCanvasDownscaleFilter(ui->downscaleFilter, draft.info, ui->baseResolution->currentText(),
 					      ui->outputResolution->currentText());
 		OBSNativeSettingsPage::AddRow(form, general, QTStr("Basic.Settings.Video.DownscaleFilter"),
-						 ui->downscaleFilter);
+					      ui->downscaleFilter);
 
 		ui->fpsType = new QComboBox(general);
 		ui->fpsType->addItem(QTStr("Basic.Settings.Video.FPSCommon"));
@@ -1927,7 +1934,8 @@ struct OBSOutputRoutesSettings::Impl {
 		if (!draft.existing) {
 			auto *mode = new QLabel(CanvasModeText(draft.creationMode), general);
 			mode->setWordWrap(true);
-			OBSNativeSettingsPage::AddRow(form, general, QTStr("OBSPro.Settings.Canvas.CreationMode"), mode);
+			OBSNativeSettingsPage::AddRow(form, general, QTStr("OBSPro.Settings.Canvas.CreationMode"),
+						      mode);
 		}
 		auto *description = new QLabel(QTStr("OBSPro.Settings.Canvas.SceneSetDescription"), contents);
 		description->setWordWrap(true);
@@ -1997,8 +2005,7 @@ struct OBSOutputRoutesSettings::Impl {
 			SyncCanvasUi(*raw);
 			MarkChanged();
 		});
-		QObject::connect(remove, &QPushButton::clicked, ui->page,
-				 [this, id = ui->id]() { RemoveCanvas(id); });
+		QObject::connect(remove, &QPushButton::clicked, ui->page, [this, id = ui->id]() { RemoveCanvas(id); });
 		canvasTabs->addTab(ui->page, draft.name);
 		canvasUis.emplace_back(std::move(ui));
 	}

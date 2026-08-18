@@ -369,9 +369,8 @@ void BasicOutputHandler::UpdateAggregateStreamingState(int code, std::string_vie
 {
 	bool anySessionActive = outputRoutes.Active();
 	if (!anySessionActive) {
-		anySessionActive = std::any_of(
-			platformSessionRuntimes.begin(), platformSessionRuntimes.end(),
-			[](const auto &session) { return IsPlatformSessionActive(*session); });
+		anySessionActive = std::any_of(platformSessionRuntimes.begin(), platformSessionRuntimes.end(),
+					       [](const auto &session) { return IsPlatformSessionActive(*session); });
 	}
 
 	if (anySessionActive) {
