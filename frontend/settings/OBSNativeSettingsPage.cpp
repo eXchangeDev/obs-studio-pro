@@ -75,6 +75,7 @@ OBSNativeSettingsPage::OBSNativeSettingsPage(QWidget *page, bool scrollable)
 	contents->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
 	scroll->setWidget(contents);
 	layout->addWidget(scroll);
+	layout = contentsLayout;
 }
 
 QScrollArea *OBSNativeSettingsPage::MoveContentsToScroll(QWidget *page)
