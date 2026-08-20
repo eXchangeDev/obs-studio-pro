@@ -128,12 +128,14 @@ void ConfigureSettingsGroup(QGroupBox *group)
 		return;
 	}
 
-	group->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+	group->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
 	if (QLayout *layout = group->layout()) {
 		layout->setSizeConstraint(QLayout::SetMinimumSize);
+		layout->invalidate();
 		layout->activate();
 	}
-	group->setMinimumHeight(group->sizeHint().height());
+	group->adjustSize();
+	group->updateGeometry();
 }
 
 void ConfigureEmbeddedPropertiesView(OBSPropertiesView *view)
@@ -1115,6 +1117,7 @@ struct OBSOutputRoutesSettings::Impl {
 		ConfigureEmbeddedPropertiesView(ui.properties);
 		ui.propertiesLayout->addWidget(ui.properties);
 		if (auto *propertiesGroup = qobject_cast<QGroupBox *>(ui.propertiesLayout->parentWidget())) {
+			ConfigureSettingsGroup(propertiesGroup);
 			QObject::connect(ui.properties, &OBSPropertiesView::PropertiesRefreshed, propertiesGroup,
 					 [propertiesGroup]() { ConfigureSettingsGroup(propertiesGroup); });
 		}
@@ -1479,6 +1482,7 @@ struct OBSOutputRoutesSettings::Impl {
 		ConfigureEmbeddedPropertiesView(view);
 		layout->addWidget(view);
 		if (auto *group = qobject_cast<QGroupBox *>(layout->parentWidget())) {
+			ConfigureSettingsGroup(group);
 			QObject::connect(view, &OBSPropertiesView::PropertiesRefreshed, group,
 					 [group]() { ConfigureSettingsGroup(group); });
 		}
@@ -1580,12 +1584,14 @@ struct OBSOutputRoutesSettings::Impl {
 			ConfigureSettingsGroup(videoGroup);
 			ui->videoPropertiesLayout = new QVBoxLayout(videoGroup);
 			ui->videoPropertiesLayout->setContentsMargins(8, 2, 8, 8);
+			ConfigureSettingsGroup(videoGroup);
 			contentsLayout->addWidget(videoGroup);
 			auto *audioGroup =
 				new QGroupBox(QTStr("OBSPro.Settings.Output.AudioEncoderSettings"), contents);
 			ConfigureSettingsGroup(audioGroup);
 			ui->audioPropertiesLayout = new QVBoxLayout(audioGroup);
 			ui->audioPropertiesLayout->setContentsMargins(8, 2, 8, 8);
+			ConfigureSettingsGroup(audioGroup);
 			contentsLayout->addWidget(audioGroup);
 
 			ui->assignedDestinations = new QLabel(contents);
