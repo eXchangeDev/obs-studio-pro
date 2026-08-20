@@ -243,6 +243,14 @@ void OBSPropertiesView::SetDisabled(bool disabled)
 	}
 }
 
+void OBSPropertiesView::SetPropertyFilter(std::function<bool(const char *)> filter)
+{
+	propertyFilter = std::move(filter);
+	if (properties) {
+		RefreshProperties();
+	}
+}
+
 void OBSPropertiesView::resizeEvent(QResizeEvent *event)
 {
 	emit PropertiesResized();
@@ -1527,6 +1535,10 @@ void OBSPropertiesView::AddProperty(obs_property_t *property, QFormLayout *layou
 {
 	const char *name = obs_property_name(property);
 	obs_property_type type = obs_property_get_type(property);
+
+	if (propertyFilter && !propertyFilter(name)) {
+		return;
+	}
 
 	if (!obs_property_visible(property)) {
 		return;

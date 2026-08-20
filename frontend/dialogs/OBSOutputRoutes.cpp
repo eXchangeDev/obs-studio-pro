@@ -61,6 +61,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <numeric>
 #include <set>
 #include <string_view>
@@ -443,6 +444,7 @@ struct OBSOutputRoutesSettings::Impl {
 		QWidget *page = nullptr;
 		QCheckBox *enabled = nullptr;
 		QLineEdit *name = nullptr;
+		QComboBox *service = nullptr;
 		QComboBox *session = nullptr;
 		QComboBox *output = nullptr;
 		QSpinBox *priority = nullptr;
@@ -1066,6 +1068,10 @@ struct OBSOutputRoutesSettings::Impl {
 		}
 		if (ui.properties) {
 			obs_data_t *settings = ui.properties->GetSettings();
+			if (ui.service) {
+				const std::string serviceName = ToStdString(ui.service->currentData().toString());
+				obs_data_set_string(settings, "service", serviceName.c_str());
+			}
 			destination->serviceSettingsJson = SettingsJson(settings);
 			destination->serviceName = obs_data_get_string(settings, "service");
 			destination->server = obs_data_get_string(settings, "server");
@@ -1105,6 +1111,7 @@ struct OBSOutputRoutesSettings::Impl {
 
 		ui.properties = new OBSPropertiesView(settings.Get(), destination->service.c_str(),
 						      (PropertiesReloadCallback)obs_get_service_properties, 170);
+		ui.properties->SetPropertyFilter([](const char *name) { return std::strcmp(name, "service") != 0; });
 		ConfigureEmbeddedPropertiesView(ui.properties);
 		ui.propertiesLayout->addWidget(ui.properties);
 		if (auto *propertiesGroup = qobject_cast<QGroupBox *>(ui.propertiesLayout->parentWidget())) {
@@ -1112,6 +1119,28 @@ struct OBSOutputRoutesSettings::Impl {
 					 [propertiesGroup]() { ConfigureSettingsGroup(propertiesGroup); });
 		}
 		QObject::connect(ui.properties, &OBSPropertiesView::Changed, ui.page, [this]() { MarkChanged(); });
+	}
+
+	void PopulateServiceCombo(QComboBox *combo, const Destination &destination)
+	{
+		if (!combo) {
+			return;
+		}
+
+		OBSProperties properties = obs_get_service_properties(destination.service.c_str());
+		obs_property_t *service = obs_properties_get(properties, "service");
+		if (!service || obs_property_get_type(service) != OBS_PROPERTY_LIST) {
+			combo->setEnabled(false);
+			return;
+		}
+
+		for (size_t index = 0; index < obs_property_list_item_count(service); ++index) {
+			combo->addItem(obs_property_list_item_name(service, index),
+				       obs_property_list_item_string(service, index));
+		}
+
+		const int selectedIndex = combo->findData(QString::fromUtf8(destination.serviceName.c_str()));
+		combo->setCurrentIndex(selectedIndex >= 0 ? selectedIndex : 0);
 	}
 
 	void MoveDestination(const QString &destinationId, const QString &targetRouteId)
@@ -1173,6 +1202,15 @@ struct OBSOutputRoutesSettings::Impl {
 			layout = page.Layout();
 		}
 		if (!primary) {
+			auto *platform = new QWidget(contents);
+			auto *platformForm = new QFormLayout(platform);
+			OBSNativeSettingsPage::ConfigureForm(platformForm);
+			ui->service = new QComboBox(platform);
+			PopulateServiceCombo(ui->service, destination);
+			OBSNativeSettingsPage::AddRow(platformForm, platform,
+						      QTStr("Basic.AutoConfig.StreamPage.Service"), ui->service);
+			layout->addWidget(platform);
+
 			auto *properties = new QGroupBox(QTStr("Basic.Settings.Stream.Destination"), contents);
 			ConfigureSettingsGroup(properties);
 			ui->propertiesLayout = new QVBoxLayout(properties);
@@ -1246,6 +1284,22 @@ struct OBSOutputRoutesSettings::Impl {
 			SyncDestinationUi(*raw);
 			MarkChanged();
 		});
+		if (ui->service) {
+			QObject::connect(ui->service, &QComboBox::currentIndexChanged, ui->page, [this, raw](int) {
+				if (!raw->properties) {
+					return;
+				}
+				auto [route, destination] = FindDestination(raw->id);
+				if (!route || !destination) {
+					return;
+				}
+				destination->serviceName = ToStdString(raw->service->currentData().toString());
+				obs_data_set_string(raw->properties->GetSettings(), "service",
+						    destination->serviceName.c_str());
+				raw->properties->ReloadProperties();
+				MarkChanged();
+			});
+		}
 		QObject::connect(ui->dynamicBitrate, &QCheckBox::toggled, ui->page, [this](bool) { MarkChanged(); });
 		QObject::connect(ui->output, &QComboBox::currentIndexChanged, ui->page, [this, raw](int) {
 			SyncDestinationUi(*raw);
