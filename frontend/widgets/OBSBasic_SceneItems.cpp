@@ -143,6 +143,11 @@ void OBSBasic::RenameSources(OBSSource source, QString newName, QString prevName
 
 	obs_scene_t *scene = obs_scene_from_source(source);
 	if (scene) {
+		OBSCanvasAutoRelease sourceCanvas = obs_source_get_canvas(source);
+		OBSCanvasAutoRelease mainCanvas = obs_get_main_canvas();
+		if (sourceCanvas == mainCanvas) {
+			RenameSceneSetVariants(scene, QT_TO_UTF8(newName));
+		}
 		OBSProjector::UpdateMultiviewProjectors();
 	}
 
@@ -1234,7 +1239,10 @@ static bool CenterAlignSelectedItems(obs_scene_t * /* scene */, obs_sceneitem_t 
 	}
 
 	obs_video_info ovi;
-	obs_get_video_info(&ovi);
+	OBSBasic *main = OBSBasic::Get();
+	if (!main || !main->GetActiveCanvasVideoInfo(&ovi)) {
+		return true;
+	}
 
 	obs_transform_info itemInfo;
 	vec2_set(&itemInfo.pos, 0.0f, 0.0f);
@@ -1336,7 +1344,7 @@ void OBSBasic::CenterSelectedSceneItems(const CenterType &centerType)
 
 	// Get coordinates of screen center
 	obs_video_info ovi;
-	obs_get_video_info(&ovi);
+	GetActiveCanvasVideoInfo(&ovi);
 
 	vec3 screenCenter;
 	vec3_set(&screenCenter, float(ovi.base_width), float(ovi.base_height), 0.0f);

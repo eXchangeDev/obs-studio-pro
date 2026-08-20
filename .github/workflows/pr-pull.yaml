@@ -19,12 +19,121 @@ jobs:
     permissions:
       contents: read
 
-  build-project:
-    name: Build 🧱
-    uses: ./.github/workflows/build-project.yaml
-    secrets: inherit
+  build-win64:
+    name: Win64 Portable 🪟
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 60
     permissions:
       contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Validate build version 🏷️
+        shell: pwsh
+        run: |
+          $Description = git describe --tags --long
+          if ( $Description -notmatch '^\d+\.\d+\.\d+(?:-(?:rc|beta)\d*)?-\d+-g[0-9a-f]+$' ) {
+            throw "git describe returned an invalid OBS version: ${Description}"
+          }
+          "Building ${Description} for Windows x64"
+
+      - name: Restore Windows dependency cache ⚡
+        id: windows-deps-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: .deps
+          key: windows-x64-deps-${{ hashFiles('CMakePresets.json') }}
+
+      - name: Restore Windows build cache ⚡
+        id: windows-build-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            build_x64
+            build_x86
+          key: windows-x64-build-${{ github.event.pull_request.number || github.ref_name }}-${{ github.sha }}-${{ hashFiles('CMakePresets.json', 'CMakeLists.txt', 'frontend/CMakeLists.txt', 'plugins/CMakeLists.txt') }}
+          restore-keys: |
+            windows-x64-build-${{ github.event.pull_request.number || github.ref_name }}-
+
+      - name: Build OBS Studio 🧱
+        uses: ./.github/actions/build-obs
+        env:
+          TWITCH_CLIENTID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_HASH: ${{ secrets.TWITCH_HASH }}
+          RESTREAM_CLIENTID: ${{ secrets.RESTREAM_CLIENTID }}
+          RESTREAM_HASH: ${{ secrets.RESTREAM_HASH }}
+          YOUTUBE_CLIENTID: ${{ secrets.YOUTUBE_CLIENTID }}
+          YOUTUBE_CLIENTID_HASH: ${{ secrets.YOUTUBE_CLIENTID_HASH }}
+          YOUTUBE_SECRET: ${{ secrets.YOUTUBE_SECRET }}
+          YOUTUBE_SECRET_HASH: ${{ secrets.YOUTUBE_SECRET_HASH }}
+          GPU_PRIORITY_VAL: ${{ secrets.GPU_PRIORITY_VAL }}
+        with:
+          target: x64
+          config: RelWithDebInfo
+
+      - name: Test platform session lifecycle 🧪
+        shell: pwsh
+        run: ctest --test-dir build_x64 -C RelWithDebInfo -R '^obs-pro-platform-session-' --output-on-failure
+
+      - name: Save Windows dependency cache ⚡
+        if: success() && steps.windows-deps-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: .deps
+          key: windows-x64-deps-${{ hashFiles('CMakePresets.json') }}
+
+      - name: Save Windows build cache ⚡
+        if: success() && steps.windows-build-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            build_x64
+            build_x86
+          key: windows-x64-build-${{ github.event.pull_request.number || github.ref_name }}-${{ github.sha }}-${{ hashFiles('CMakePresets.json', 'CMakeLists.txt', 'frontend/CMakeLists.txt', 'plugins/CMakeLists.txt') }}
+
+      - name: Package portable Win64 build 📦
+        uses: ./.github/actions/package-obs
+        with:
+          target: x64
+          config: RelWithDebInfo
+
+      - name: Verify obs64.exe ✅
+        id: verify
+        shell: pwsh
+        run: |
+          $Archive = Get-ChildItem -Path '${{ github.workspace }}/build_x64' `
+            -Filter 'obs-studio-*-windows-x64.zip' -File | Select-Object -First 1
+          if ( $null -eq $Archive ) {
+            throw 'The Windows x64 package was not created.'
+          }
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $Zip = [System.IO.Compression.ZipFile]::OpenRead($Archive.FullName)
+          try {
+            $Executable = $Zip.Entries |
+              Where-Object { $_.FullName -match '(^|/)bin/64bit/obs64\.exe$' } |
+              Select-Object -First 1
+            if ( $null -eq $Executable -or $Executable.Length -le 0 ) {
+              throw 'The portable package does not contain a non-empty bin/64bit/obs64.exe.'
+            }
+            "Verified $($Executable.FullName) ($($Executable.Length) bytes)"
+          } finally {
+            $Zip.Dispose()
+          }
+
+          "archivePath=$($Archive.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Upload Win64 portable build 📡
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: obs-studio-pro-win64-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ steps.verify.outputs.archivePath }}
+          if-no-files-found: error
+          retention-days: 14
 
   compatibility-validation:
     name: Validate Compatibility 🕵️

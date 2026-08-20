@@ -1,6 +1,8 @@
 #pragma once
 
 #include <utility/MultitrackVideoOutput.hpp>
+#include <utility/PlatformSession.hpp>
+#include <utility/OutputRouteRuntime.hpp>
 #include <utility/WHIPSimulcastEncoders.hpp>
 
 #include <obs.hpp>
@@ -8,6 +10,8 @@
 
 #include <functional>
 #include <future>
+#include <string_view>
+#include <vector>
 
 #define RTMP_PROTOCOL "rtmp"
 #define SRT_PROTOCOL "srt"
@@ -16,6 +20,12 @@
 class OBSBasic;
 
 using SetupStreamingContinuation_t = std::function<void(bool)>;
+
+enum class ReplayProgramBindingResult {
+	Legacy,
+	Configured,
+	Failed,
+};
 
 struct BasicOutputHandler {
 	OBSOutputAutoRelease fileOutput;
@@ -29,7 +39,14 @@ struct BasicOutputHandler {
 	bool virtualCamActive = false;
 	OBSBasic *main;
 
-	std::unique_ptr<MultitrackVideoOutput> multitrackVideo;
+	// Compatibility alias only. The actual MultitrackVideoOutput is owned by
+	// multitrackSession so provider state and failures remain session-scoped.
+	MultitrackVideoOutput *multitrackVideo = nullptr;
+	OBS::Output::PlatformSession *multitrackSession = nullptr;
+	OBS::Output::PlatformSession *compatibilitySession = nullptr;
+	// Shared ownership keeps an asynchronous provider setup alive long enough
+	// to reject its callback safely if a newer setup supersedes it.
+	std::vector<std::shared_ptr<OBS::Output::PlatformSession>> platformSessionRuntimes;
 	bool multitrackVideoActive = false;
 
 	OBSOutputAutoRelease StreamingOutput() const
@@ -45,6 +62,8 @@ struct BasicOutputHandler {
 	obs_sceneitem_t *vCamSourceSceneItem = nullptr;
 
 	std::unique_ptr<WHIPSimulcastEncoders> whipSimulcastEncoders;
+	OBS::Output::Runtime outputRoutes;
+	OBS::Output::SessionSet platformSessions;
 
 	std::string outputType;
 	std::string lastError;
@@ -89,6 +108,18 @@ struct BasicOutputHandler {
 	virtual void Update() = 0;
 	virtual void SetupOutputs() = 0;
 
+	bool PrepareOutputRoutes(obs_output_t *referenceOutput);
+	bool PrepareOutputRoutes(obs_encoder_t *referenceVideo, obs_encoder_t *referenceAudio);
+	size_t StartOutputRoutes();
+	size_t StartOutputSession(std::string_view sessionId);
+	void StopOutputRoutes(bool force = false);
+	void StopOutputSession(std::string_view sessionId, bool force = false);
+	std::vector<OBS::Output::SessionSnapshot> OutputSessionSnapshots() const;
+	OBS::Output::PlatformSession *FindPlatformSessionForOutput(obs_output_t *output) const;
+	void OutputRouteStateChanged(std::string_view sessionId, OBS::Output::RuntimeState state,
+				     std::string_view error);
+	void UpdateAggregateStreamingState(int code = OBS_OUTPUT_SUCCESS, std::string_view error = {});
+
 	virtual void UpdateVirtualCamOutputSource();
 	virtual void DestroyVirtualCamView();
 	virtual void DestroyVirtualCameraScene();
@@ -96,16 +127,29 @@ struct BasicOutputHandler {
 	inline bool Active() const
 	{
 		return streamingActive || recordingActive || delayActive || replayBufferActive || virtualCamActive ||
-		       multitrackVideoActive;
+		       multitrackVideoActive || outputRoutes.Active();
+	}
+
+	bool HasActiveStreamingState() const
+	{
+		const auto output = StreamingOutput();
+		return streamingActive || (output && obs_output_active(output)) || outputRoutes.Active();
 	}
 
 protected:
+	bool LoadPlatformSessions(OBS::Output::RouteSet &routes, std::string &error);
+	OBS::Output::PlatformSession *PrepareCompatibilitySession(obs_service_t *service);
+	OBS::Output::PlatformSession *FindPlatformSession(std::string_view sessionId) const;
+	void AttachOutputRouteSessions();
+	ReplayProgramBindingResult ConfigureReplayBufferProgram(obs_encoder_t *referenceVideo,
+								obs_encoder_t *referenceAudio, std::string &error);
 	void SetupAutoRemux(const char *&container);
 	std::string GetRecordingFilename(const char *path, const char *container, bool noSpace, bool overwrite,
 					 const char *format, bool ffmpeg);
 
-	std::shared_future<void> SetupMultitrackVideo(obs_service_t *service, std::string audio_encoder_id,
-						      size_t main_audio_mixer, std::optional<size_t> vod_track_mixer,
+	std::shared_future<void> SetupMultitrackVideo(OBS::Output::PlatformSession &session,
+						      std::string audio_encoder_id, size_t main_audio_mixer,
+						      std::optional<size_t> vod_track_mixer,
 						      std::function<void(std::optional<bool>)> continuation);
 	OBSDataAutoRelease GenerateMultitrackVideoStreamDumpConfig();
 };

@@ -5,6 +5,7 @@
 #include <obs.hpp>
 #include <qtimer.h>
 #include <QPointer>
+#include <functional>
 #include <vector>
 #include <memory>
 
@@ -103,6 +104,7 @@ private:
 	bool deferUpdate;
 	bool enableDefer = true;
 	bool disableScrolling = false;
+	std::function<bool(const char *)> propertyFilter;
 
 	template<typename Sender, typename SenderParent, typename... Args>
 	QWidget *NewWidget(obs_property_t *prop, Sender *widget, void (SenderParent::*signal)(Args...));
@@ -185,6 +187,7 @@ public:
 	}
 
 	void SetDisabled(bool disabled);
+	void SetPropertyFilter(std::function<bool(const char *)> filter);
 
 #define Def_IsObject(type)                                \
 	inline bool IsObject(obs_##type##_t *type) const  \

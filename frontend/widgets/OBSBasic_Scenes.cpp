@@ -106,6 +106,11 @@ void OBSBasic::AddScene(OBSSource source)
 {
 	const char *name = obs_source_get_name(source);
 	obs_scene_t *scene = obs_scene_from_source(source);
+	OBSCanvasAutoRelease sourceCanvas = obs_source_get_canvas(source);
+	OBSCanvasAutoRelease mainCanvas = obs_get_main_canvas();
+	if (!scene || sourceCanvas != mainCanvas) {
+		return;
+	}
 
 	QListWidgetItem *item = new QListWidgetItem(QT_UTF8(name));
 	SetOBSRef(item, OBSScene(scene));
@@ -163,6 +168,12 @@ void OBSBasic::AddScene(OBSSource source)
 	}
 
 	OnEvent(OBS_FRONTEND_EVENT_SCENE_LIST_CHANGED);
+
+	if (loaded && !disableSaving) {
+		for (const OBS::Canvas &canvas : canvases) {
+			InitializeCanvasSceneSets(canvas, false, false);
+		}
+	}
 }
 
 void OBSBasic::RemoveScene(OBSSource source)
@@ -239,7 +250,7 @@ void OBSBasic::AddSceneItem(OBSSceneItem item)
 
 void OBSBasic::DuplicateSelectedScene()
 {
-	OBSScene curScene = GetCurrentScene();
+	OBSScene curScene = GetCurrentSceneSetMainScene();
 
 	if (!curScene) {
 		return;
@@ -278,11 +289,16 @@ void OBSBasic::DuplicateSelectedScene()
 		}
 
 		OBSSceneAutoRelease scene = obs_scene_duplicate(curScene, name.c_str(), OBS_SCENE_DUP_REFS);
+		RemoveSceneSetVariants(OBSScene(scene.Get()));
+		for (const OBS::Canvas &canvas : canvases) {
+			InitializeCanvasSceneSets(canvas, true, false);
+		}
 		source = obs_scene_get_source(scene);
 		SetCurrentScene(source, true);
 
-		auto undo = [](const std::string &data) {
+		auto undo = [this](const std::string &data) {
 			OBSSourceAutoRelease source = obs_get_source_by_name(data.c_str());
+			RemoveSceneSetVariants(obs_scene_from_source(source));
 			obs_source_remove(source);
 		};
 
@@ -290,6 +306,10 @@ void OBSBasic::DuplicateSelectedScene()
 			OBSSourceAutoRelease source = obs_get_source_by_name(data.c_str());
 			obs_scene_t *scene = obs_scene_from_source(source);
 			scene = obs_scene_duplicate(scene, name.c_str(), OBS_SCENE_DUP_REFS);
+			RemoveSceneSetVariants(scene);
+			for (const OBS::Canvas &canvas : canvases) {
+				InitializeCanvasSceneSets(canvas, true, false);
+			}
 			source = obs_scene_get_source(scene);
 			SetCurrentScene(source.Get(), true);
 		};
@@ -343,11 +363,20 @@ static inline void RemoveSceneAndReleaseNested(obs_source_t *source)
 
 void OBSBasic::RemoveSelectedScene()
 {
-	OBSScene scene = GetCurrentScene();
+	OBSScene scene = GetCurrentSceneSetMainScene();
 	obs_source_t *source = obs_scene_get_source(scene);
 
 	if (!source || !QueryRemoveSource(source)) {
 		return;
+	}
+
+	std::vector<std::pair<std::string, OBSScene>> sceneSetVariants;
+	for (const OBS::Canvas &canvasRef : canvases) {
+		obs_canvas_t *canvas = canvasRef;
+		OBSScene variant = FindSceneSetVariant(canvas, obs_source_get_uuid(source));
+		if (variant) {
+			sceneSetVariants.emplace_back(obs_canvas_get_uuid(canvas), std::move(variant));
+		}
 	}
 
 	/* ------------------------------ */
@@ -391,7 +420,7 @@ void OBSBasic::RemoveSelectedScene()
 	/* --------------------------- */
 	/* undo/redo                   */
 
-	auto undo = [this](const std::string &json) {
+	auto undo = [this, sceneSetVariants](const std::string &json) {
 		OBSDataAutoRelease base = obs_data_create_from_json(json.c_str());
 		OBSDataArrayAutoRelease sources_in_deleted_scene = obs_data_get_array(base, "sources_in_deleted_scene");
 		OBSDataArrayAutoRelease scene_used_in_other_scenes =
@@ -445,6 +474,13 @@ void OBSBasic::RemoveSelectedScene()
 
 		obs_source_t *scene_source = sources.back();
 		OBSScene scene = obs_scene_from_source(scene_source);
+		RemoveSceneSetVariants(scene);
+		for (const auto &[canvasUuid, variant] : sceneSetVariants) {
+			OBSCanvasAutoRelease canvas = obs_get_canvas_by_uuid(canvasUuid.c_str());
+			if (canvas && variant) {
+				obs_canvas_move_scene(variant, canvas);
+			}
+		}
 		SetCurrentScene(scene, true);
 
 		/* set original index in list box */
@@ -457,8 +493,9 @@ void OBSBasic::RemoveSelectedScene()
 		ui->scenes->blockSignals(false);
 	};
 
-	auto redo = [](const std::string &name) {
+	auto redo = [this](const std::string &name) {
 		OBSSourceAutoRelease source = obs_get_source_by_name(name.c_str());
+		RemoveSceneSetVariants(obs_scene_from_source(source));
 		RemoveSceneAndReleaseNested(source);
 	};
 
@@ -473,6 +510,7 @@ void OBSBasic::RemoveSelectedScene()
 	/* --------------------------- */
 	/* remove                      */
 
+	RemoveSceneSetVariants(scene);
 	RemoveSceneAndReleaseNested(source);
 
 	OnEvent(OBS_FRONTEND_EVENT_SCENE_LIST_CHANGED);
@@ -925,7 +963,7 @@ static void RenameListItem(OBSBasic *parent, QListWidget *listWidget, obs_source
 
 void OBSBasic::SceneNameEdited(QWidget *editor)
 {
-	OBSScene scene = GetCurrentScene();
+	OBSScene scene = GetCurrentSceneSetMainScene();
 	QLineEdit *edit = qobject_cast<QLineEdit *>(editor);
 	string text = edit->text().trimmed().toStdString();
 

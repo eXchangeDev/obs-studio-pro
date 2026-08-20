@@ -18,7 +18,7 @@
 
 #include <algorithm>
 #include <cinttypes>
-#include <string_view>
+#include <utility>
 
 // Codec profile strings
 static const char *h264_main = "Main";
@@ -28,8 +28,6 @@ static const char *hevc_main = "Main";
 static const char *hevc_main10 = "Main 10";
 static const char *av1_main = "Main";
 
-constexpr std::string_view kCustomRtmpIdentifier{"rtmp_custom"};
-
 // Maximum reconnect attempts with an invalid key error before giving up (roughly 30 seconds with default start value)
 static constexpr uint8_t MAX_RECONNECT_ATTEMPTS = 5;
 
@@ -38,6 +36,11 @@ using json = nlohmann::json;
 Qt::ConnectionType BlockingConnectionTypeFor(QObject *object)
 {
 	return object->thread() == QThread::currentThread() ? Qt::DirectConnection : Qt::BlockingQueuedConnection;
+}
+
+MultitrackVideoOutput::~MultitrackVideoOutput()
+{
+	lifetime_token.reset();
 }
 
 static OBSServiceAutoRelease create_service(const GoLiveApi::Config &go_live_config,
@@ -347,9 +350,9 @@ static void SetupSignalHandlers(bool recording, MultitrackVideoOutput *self, obs
 void MultitrackVideoOutput::PrepareStreaming(
 	QWidget *parent, const char *service_name, obs_service_t *service, const std::optional<std::string> &rtmp_url,
 	const QString &stream_key, const char *audio_encoder_id, std::optional<uint32_t> maximum_aggregate_bitrate,
-	std::optional<uint32_t> maximum_video_tracks, std::optional<std::string> custom_config,
+	std::optional<uint32_t> maximum_video_tracks, OBS::Output::MultitrackConfigProvider config_provider,
 	obs_data_t *dump_stream_to_file_config, size_t main_audio_mixer, std::optional<size_t> vod_track_mixer,
-	std::optional<bool> use_rtmps, std::optional<QString> extra_canvas)
+	std::optional<bool> use_rtmps, const std::vector<std::string> &canvas_uuids)
 {
 	{
 		const std::lock_guard<std::mutex> current_lock{current_mutex};
@@ -364,8 +367,9 @@ void MultitrackVideoOutput::PrepareStreaming(
 
 	std::optional<GoLiveApi::Config> go_live_config;
 	std::optional<GoLiveApi::Config> custom;
-	bool is_custom_config = custom_config.has_value();
-	auto auto_config_url = MultitrackVideoAutoConfigURL(service);
+	const bool is_custom_config = config_provider.IsJson();
+	const QString auto_config_url = config_provider.IsRemote() ? QString::fromStdString(config_provider.value)
+								   : QString{};
 
 	OBSDataAutoRelease service_settings = obs_service_get_settings(service);
 	auto multitrack_video_name = QTStr("Basic.Settings.Stream.MultitrackVideoLabel");
@@ -376,14 +380,24 @@ void MultitrackVideoOutput::PrepareStreaming(
 	auto auto_config_url_data = auto_config_url.toUtf8();
 
 	std::vector<OBSCanvasAutoRelease> canvases;
-
-	canvases.emplace_back(obs_get_main_canvas());
-	if (extra_canvas) {
-		obs_canvas_t *canvas = obs_get_canvas_by_uuid(extra_canvas->toUtf8().constData());
-		if (!canvas) {
-			throw MultitrackVideoError::critical(QTStr("FailedToStartStream.MissingCanvas"));
+	if (canvas_uuids.empty()) {
+		canvases.emplace_back(obs_get_main_canvas());
+	} else {
+		for (const std::string &uuid : canvas_uuids) {
+			obs_canvas_t *canvas = obs_get_canvas_by_uuid(uuid.c_str());
+			if (!canvas) {
+				throw MultitrackVideoError::critical(QTStr("FailedToStartStream.MissingCanvas"));
+			}
+			const bool duplicate = std::any_of(canvases.begin(), canvases.end(),
+							   [canvas](const OBSCanvasAutoRelease &item) {
+								   return item.Get() == canvas;
+							   });
+			if (duplicate) {
+				obs_canvas_release(canvas);
+				continue;
+			}
+			canvases.emplace_back(canvas);
 		}
-		canvases.emplace_back(canvas);
 	}
 
 	std::string canvasNames;
@@ -401,7 +415,7 @@ void MultitrackVideoOutput::PrepareStreaming(
 	}
 
 	blog(LOG_INFO,
-	     "Preparing enhanced broadcasting stream for:\n"
+	     "Preparing multitrack stream for:\n"
 	     "    custom config:  %s\n"
 	     "    config url:     %s\n"
 	     "  settings:\n"
@@ -418,44 +432,26 @@ void MultitrackVideoOutput::PrepareStreaming(
 	     rtmp_url.has_value() ? rtmp_url->c_str() : "",
 	     vod_track_info_storage->array ? vod_track_info_storage->array : "No", canvasNames.c_str());
 
-	// This will crash if serviceId is a nullptr. Deliberately unhandled because that would constitute a critical
-	// application state error.
-	const char *serviceId = obs_service_get_id(service);
-	std::string_view serviceIdString{serviceId};
-
-	bool isCustomRtmpService = (serviceIdString == kCustomRtmpIdentifier);
 	bool hasAutoConfigUrl = !auto_config_url.isEmpty();
-	bool hasCustomConfig = custom_config.has_value();
+	if (config_provider.IsRemote() && hasAutoConfigUrl) {
+		auto go_live_post = constructGoLivePost(stream_key, maximum_aggregate_bitrate, maximum_video_tracks,
+							vod_track_mixer.has_value(), canvases);
 
-	if (!isCustomRtmpService) {
-		if (hasAutoConfigUrl) {
-			auto go_live_post = constructGoLivePost(stream_key, maximum_aggregate_bitrate,
-								maximum_video_tracks, vod_track_mixer.has_value(),
-								canvases);
+		go_live_config = DownloadGoLiveConfig(parent, auto_config_url, go_live_post, multitrack_video_name);
 
-			go_live_config =
-				DownloadGoLiveConfig(parent, auto_config_url, go_live_post, multitrack_video_name);
-
-			if (go_live_config) {
-				blog(LOG_INFO, "Enhanced broadcasting config_id: '%s'",
-				     go_live_config->meta.config_id.c_str());
-			}
+		if (go_live_config) {
+			blog(LOG_INFO, "Multitrack provider config_id: '%s'", go_live_config->meta.config_id.c_str());
 		}
-	} else {
-		if (hasCustomConfig) {
-			GoLiveApi::Config parsed_custom;
-			try {
-				parsed_custom = nlohmann::json::parse(*custom_config);
-			} catch (const nlohmann::json::exception &exception) {
-				blog(LOG_WARNING, "Failed to parse custom config: %s", exception.what());
-				throw MultitrackVideoError::critical(QTStr("FailedToStartStream.InvalidCustomConfig"));
-			}
-
-			nlohmann::json custom_data = parsed_custom;
-			blog(LOG_INFO, "Using custom go live config: %s", custom_data.dump(4).c_str());
-
-			custom.emplace(std::move(parsed_custom));
+	} else if (config_provider.IsJson() && !config_provider.value.empty()) {
+		GoLiveApi::Config parsed_custom;
+		try {
+			parsed_custom = nlohmann::json::parse(config_provider.value);
+		} catch (const nlohmann::json::exception &exception) {
+			blog(LOG_WARNING, "Failed to parse multitrack JSON configuration: %s", exception.what());
+			throw MultitrackVideoError::critical(QTStr("FailedToStartStream.InvalidCustomConfig"));
 		}
+
+		custom.emplace(std::move(parsed_custom));
 	}
 
 	if (!(go_live_config || custom)) {
@@ -871,15 +867,28 @@ std::optional<MultitrackVideoOutput::OBSOutputObjects> MultitrackVideoOutput::ta
 	return val;
 }
 
-void MultitrackVideoOutput::ReleaseOnMainThread(std::optional<OBSOutputObjects> objects)
+void MultitrackVideoOutput::ReleaseOnMainThread(MultitrackVideoOutput *self, std::weak_ptr<int> lifetime_token,
+						bool stream_dump)
 {
-
-	if (!objects.has_value()) {
+	if (!self || lifetime_token.expired()) {
 		return;
 	}
 
 	QMetaObject::invokeMethod(
-		QApplication::instance()->thread(), [objects = std::move(objects)] {}, Qt::QueuedConnection);
+		QApplication::instance()->thread(),
+		[self, lifetime_token = std::move(lifetime_token), stream_dump] {
+			if (lifetime_token.expired()) {
+				return;
+			}
+			/* Moving the objects here, after the output's stop signal has
+			 * returned, disconnects the internal signal safely. */
+			if (stream_dump) {
+				self->take_current_stream_dump();
+			} else {
+				self->take_current();
+			}
+		},
+		Qt::QueuedConnection);
 }
 
 void StreamStartHandler(void *arg, calldata_t *)
@@ -908,7 +917,7 @@ void StreamStopHandler(void *arg, calldata_t *data)
 	obs_output_remove_packet_callback(static_cast<obs_output_t *>(calldata_ptr(data, "output")), bpm_inject, NULL);
 	bpm_destroy(static_cast<obs_output_t *>(calldata_ptr(data, "output")));
 
-	MultitrackVideoOutput::ReleaseOnMainThread(self->take_current());
+	MultitrackVideoOutput::ReleaseOnMainThread(self, self->lifetime_token, false);
 }
 
 void RecordingStartHandler(void * /* arg */, calldata_t * /* data */)
@@ -920,5 +929,5 @@ void RecordingStopHandler(void *arg, calldata_t *)
 {
 	auto self = static_cast<MultitrackVideoOutput *>(arg);
 	blog(LOG_INFO, "MultitrackVideoOutput: recording stopped");
-	MultitrackVideoOutput::ReleaseOnMainThread(self->take_current_stream_dump());
+	MultitrackVideoOutput::ReleaseOnMainThread(self, self->lifetime_token, true);
 }

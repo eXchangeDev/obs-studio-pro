@@ -88,7 +88,7 @@ void OBSBasic::UpdatePreviewScalingMenu()
 	}
 
 	obs_video_info ovi;
-	obs_get_video_info(&ovi);
+	GetActiveCanvasVideoInfo(&ovi);
 
 	ui->actionScaleWindow->setChecked(false);
 	ui->actionScaleCanvas->setChecked(scalingAmount == 1.0f);
@@ -136,7 +136,10 @@ void OBSBasic::RenderMain(void *data, uint32_t, uint32_t)
 	OBSBasic *window = static_cast<OBSBasic *>(data);
 	obs_video_info ovi;
 
-	obs_get_video_info(&ovi);
+	if (!window->GetActiveCanvasVideoInfo(&ovi)) {
+		GS_DEBUG_MARKER_END();
+		return;
+	}
 
 	window->previewCX = int(window->previewScale * float(ovi.base_width));
 	window->previewCY = int(window->previewScale * float(ovi.base_height));
@@ -159,11 +162,13 @@ void OBSBasic::RenderMain(void *data, uint32_t, uint32_t)
 	gs_ortho(0.0f, float(ovi.base_width), 0.0f, float(ovi.base_height), -100.0f, 100.0f);
 	gs_set_viewport(window->previewX, window->previewY, window->previewCX, window->previewCY);
 
-	if (window->IsPreviewProgramMode()) {
+	OBSCanvasAutoRelease activeCanvas = window->GetActiveCanvas();
+	OBSCanvasAutoRelease mainCanvas = obs_get_main_canvas();
+	if (window->IsPreviewProgramMode() || activeCanvas != mainCanvas) {
 		window->DrawBackdrop(float(ovi.base_width), float(ovi.base_height));
 
 		OBSScene scene = window->GetCurrentScene();
-		obs_source_t *source = obs_scene_get_source(scene);
+		obs_source_t *source = scene ? obs_scene_get_source(scene) : nullptr;
 		if (source) {
 			obs_source_video_render(source);
 		}
@@ -207,13 +212,11 @@ void OBSBasic::ResizePreview(uint32_t cx, uint32_t cy)
 {
 	QSize targetSize;
 	bool isFixedScaling;
-	obs_video_info ovi;
 
 	/* resize preview panel to fix to the top section of the window */
 	targetSize = GetPixelSize(ui->preview);
 
 	isFixedScaling = ui->preview->IsFixedScaling();
-	obs_get_video_info(&ovi);
 
 	if (isFixedScaling) {
 		previewScale = ui->preview->GetScalingAmount();
@@ -389,7 +392,7 @@ void OBSBasic::on_actionLockPreview_triggered()
 void OBSBasic::on_scalingMenu_aboutToShow()
 {
 	obs_video_info ovi;
-	obs_get_video_info(&ovi);
+	GetActiveCanvasVideoInfo(&ovi);
 
 	QAction *action = ui->actionScaleCanvas;
 	QString text = QTStr("Basic.MainMenu.Edit.Scale.Canvas");
@@ -424,7 +427,7 @@ void OBSBasic::setPreviewScalingCanvas()
 void OBSBasic::setPreviewScalingOutput()
 {
 	obs_video_info ovi;
-	obs_get_video_info(&ovi);
+	GetActiveCanvasVideoInfo(&ovi);
 
 	ui->preview->SetFixedScaling(true);
 	float scalingAmount = float(ovi.output_width) / float(ovi.base_width);

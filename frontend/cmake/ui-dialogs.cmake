@@ -13,6 +13,8 @@ target_link_libraries(obs-studio PRIVATE OBS::properties-view)
 target_sources(
   obs-studio
   PRIVATE
+    dialogs/OBSOutputRoutes.cpp
+    dialogs/OBSOutputRoutes.hpp
     dialogs/LogUploadDialog.cpp
     dialogs/LogUploadDialog.hpp
     dialogs/NameDialog.cpp

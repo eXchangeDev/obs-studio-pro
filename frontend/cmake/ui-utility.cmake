@@ -23,6 +23,8 @@ target_sources(
     utility/MissingFilesModel.hpp
     utility/MissingFilesPathItemDelegate.cpp
     utility/MissingFilesPathItemDelegate.hpp
+    utility/MultitrackConfigProvider.cpp
+    utility/MultitrackConfigProvider.hpp
     utility/MultitrackVideoError.cpp
     utility/MultitrackVideoError.hpp
     utility/MultitrackVideoOutput.cpp
@@ -37,6 +39,13 @@ target_sources(
     utility/OBSThemeVariable.hpp
     utility/OBSTranslator.cpp
     utility/OBSTranslator.hpp
+    utility/OutputRoute.cpp
+    utility/OutputRoute.hpp
+    utility/OutputRouteRuntime.cpp
+    utility/OutputRouteRuntime.hpp
+    utility/PlatformSession.cpp
+    utility/PlatformSession.hpp
+    utility/PlatformSessionRuntime.cpp
     utility/PreviewProgramSizeObserver.cpp
     utility/PreviewProgramSizeObserver.hpp
     utility/QuickTransition.cpp

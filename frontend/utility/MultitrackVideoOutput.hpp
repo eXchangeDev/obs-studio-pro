@@ -1,5 +1,7 @@
 #pragma once
 
+#include "MultitrackConfigProvider.hpp"
+
 #include <obs.hpp>
 #include <util/config-file.h>
 
@@ -20,13 +22,16 @@ void RecordingStopHandler(void *arg, calldata_t *);
 
 struct MultitrackVideoOutput {
 public:
+	~MultitrackVideoOutput();
+
 	void PrepareStreaming(QWidget *parent, const char *service_name, obs_service_t *service,
 			      const std::optional<std::string> &rtmp_url, const QString &stream_key,
 			      const char *audio_encoder_id, std::optional<uint32_t> maximum_aggregate_bitrate,
-			      std::optional<uint32_t> maximum_video_tracks, std::optional<std::string> custom_config,
+			      std::optional<uint32_t> maximum_video_tracks,
+			      OBS::Output::MultitrackConfigProvider config_provider,
 			      obs_data_t *dump_stream_to_file_config, size_t main_audio_mixer,
 			      std::optional<size_t> vod_track_mixer, std::optional<bool> use_rtmps,
-			      std::optional<QString> extra_canvas);
+			      const std::vector<std::string> &canvas_uuids);
 	signal_handler_t *StreamingSignalHandler();
 	void StartedStreaming();
 	void StopStreaming();
@@ -52,13 +57,18 @@ private:
 	std::optional<OBSOutputObjects> take_current();
 	std::optional<OBSOutputObjects> take_current_stream_dump();
 
-	static void ReleaseOnMainThread(std::optional<OBSOutputObjects> objects);
+	/* Stop callbacks are dispatched to every listener in order. Defer taking
+	 * the current objects until that dispatch has completed so destroying the
+	 * internal stop signal cannot skip a frontend stop callback. */
+	static void ReleaseOnMainThread(MultitrackVideoOutput *self, std::weak_ptr<int> lifetime_token,
+					bool stream_dump);
 
 	std::mutex current_mutex;
 	std::optional<OBSOutputObjects> current;
 
 	std::mutex current_stream_dump_mutex;
 	std::optional<OBSOutputObjects> current_stream_dump;
+	std::shared_ptr<int> lifetime_token = std::make_shared<int>(0);
 
 	bool restart_on_error = false;
 	uint8_t reconnect_attempts = 0;

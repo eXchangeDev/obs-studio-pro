@@ -20,6 +20,8 @@
 #include "OBSHotkeyLabel.hpp"
 #include "OBSHotkeyWidget.hpp"
 
+#include <dialogs/OBSOutputRoutes.hpp>
+
 #include <components/Multiview.hpp>
 #include <components/OBSSourceLabel.hpp>
 #include <components/SilentUpdateCheckBox.hpp>
@@ -853,6 +855,8 @@ OBSBasicSettings::OBSBasicSettings(QWidget *parent)
 
 	InitStreamPage();
 	InitAppearancePage();
+	outputRoutesSettings = std::make_unique<OBSOutputRoutesSettings>(
+		main, ui->streamPage, ui->outputPage, ui->videoPage, [this]() { OutputRoutesChanged(); });
 	LoadSettings(false);
 
 	ui->advOutTrack1->setAccessibleName(QTStr("Basic.Settings.Output.Adv.Audio.Track1"));
@@ -3007,6 +3011,9 @@ void OBSBasicSettings::LoadHotkeySettings(obs_hotkey_id ignoreKey)
 
 void OBSBasicSettings::LoadSettings(bool changedOnly)
 {
+	if (outputRoutesSettings && (!changedOnly || outputRoutesChanged)) {
+		outputRoutesSettings->Load();
+	}
 	if (!changedOnly || generalChanged) {
 		LoadGeneralSettings();
 	}
@@ -3767,8 +3774,15 @@ static void AddChangedVal(std::string &changed, const char *str)
 	changed += str;
 }
 
-void OBSBasicSettings::SaveSettings()
+bool OBSBasicSettings::SaveSettings()
 {
+	if (outputRoutesChanged && outputRoutesSettings) {
+		QString error;
+		if (!outputRoutesSettings->Save(error)) {
+			OBSMessageBox::warning(this, QTStr("OBSPro.OutputRoutes.InvalidConfiguration"), error);
+			return false;
+		}
+	}
 	if (generalChanged) {
 		SaveGeneralSettings();
 	}
@@ -3815,6 +3829,9 @@ void OBSBasicSettings::SaveSettings()
 		if (outputsChanged) {
 			AddChangedVal(changed, "outputs");
 		}
+		if (outputRoutesChanged) {
+			AddChangedVal(changed, "output routes and canvases");
+		}
 		if (audioChanged) {
 			AddChangedVal(changed, "audio");
 		}
@@ -3848,6 +3865,8 @@ void OBSBasicSettings::SaveSettings()
 	} else {
 		restart = false;
 	}
+
+	return true;
 }
 
 bool OBSBasicSettings::QueryChanges()
@@ -3864,7 +3883,9 @@ bool OBSBasicSettings::QueryChanges()
 			return false;
 		}
 
-		SaveSettings();
+		if (!SaveSettings()) {
+			return false;
+		}
 	} else {
 		if (savedTheme != App()->GetTheme()) {
 			App()->SetTheme(savedTheme->id);
@@ -3880,6 +3901,14 @@ bool OBSBasicSettings::QueryChanges()
 
 bool OBSBasicSettings::QueryAllowedToClose()
 {
+	if (outputRoutesSettings) {
+		QString error;
+		if (!outputRoutesSettings->Validate(error)) {
+			OBSMessageBox::warning(this, QTStr("OBSPro.OutputRoutes.InvalidConfiguration"), error);
+			return false;
+		}
+	}
+
 	bool simple = (ui->outputMode->currentIndex() == 0);
 
 	bool invalidEncoder = false;
@@ -4013,7 +4042,9 @@ void OBSBasicSettings::on_buttonBox_clicked(QAbstractButton *button)
 			return;
 		}
 
-		SaveSettings();
+		if (!SaveSettings()) {
+			return;
+		}
 
 		UpdateYouTubeAppDockSettings();
 		ClearChanged();
@@ -4309,6 +4340,14 @@ void OBSBasicSettings::OutputsChanged()
 		EnableApplyButton(true);
 
 		UpdateMultitrackVideo();
+	}
+}
+
+void OBSBasicSettings::OutputRoutesChanged()
+{
+	if (!loading) {
+		outputRoutesChanged = true;
+		EnableApplyButton(true);
 	}
 }
 

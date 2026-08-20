@@ -675,8 +675,16 @@ static bool restore_canvases(void)
 		obs_canvas_t *canvas = (obs_canvas_t *)ctx;
 		if (canvas->flags & MAIN)
 			continue;
-		if (!obs_canvas_has_valid_video_info(canvas))
-			continue;
+		if (!obs_canvas_has_valid_video_info(canvas)) {
+			/* Collections written before canvas video info was persisted contain
+			 * only the canvas identity.  Keep those canvases usable after a
+			 * video reset by inheriting the current main-canvas format. */
+			if (!obs->data.main_canvas->mix)
+				continue;
+			canvas->ovi = obs->data.main_canvas->mix->ovi;
+			blog(LOG_WARNING, "Canvas '%s' has no saved video info; inheriting main canvas settings",
+			     canvas->context.name);
+		}
 
 		if (!obs_canvas_reset_video_internal(canvas, &canvas->ovi)) {
 			blog(LOG_ERROR, "Failed restoring video mix for canvas '%s'", canvas->context.name);

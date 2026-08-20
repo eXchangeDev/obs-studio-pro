@@ -27,6 +27,8 @@
 
 #include <qt-wrappers.hpp>
 
+#include <QTimer>
+
 #define STREAMING_START "==== Streaming Start ==============================================="
 #define STREAMING_STOP "==== Streaming Stop ================================================"
 
@@ -133,6 +135,7 @@ void OBSBasic::StopStreaming()
 
 	if (outputHandler->StreamingActive()) {
 		outputHandler->StopStreaming(streamingStopping);
+		QTimer::singleShot(100, this, &OBSBasic::ReconcileStreamingStop);
 	}
 
 	// special case: force reset broadcast state if
@@ -175,6 +178,7 @@ void OBSBasic::ForceStopStreaming()
 
 	if (outputHandler->StreamingActive()) {
 		outputHandler->StopStreaming(true);
+		QTimer::singleShot(100, this, &OBSBasic::ReconcileStreamingStop);
 	}
 
 	// special case: force reset broadcast state if
@@ -208,6 +212,21 @@ void OBSBasic::ForceStopStreaming()
 		config_get_bool(App()->GetUserConfig(), "BasicWindow", "KeepReplayBufferStreamStops");
 	if (replayBufferWhileStreaming && !keepReplayBufferStreamStops) {
 		StopReplayBuffer();
+	}
+}
+
+void OBSBasic::ReconcileStreamingStop()
+{
+	if (!outputHandler) {
+		return;
+	}
+
+	/* The normal libobs stop callback remains authoritative. This retry only
+	 * closes the aggregate-state gap when a provider-owned stop signal is lost
+	 * after its output has already become inactive. */
+	outputHandler->UpdateAggregateStreamingState();
+	if (outputHandler->StreamingActive()) {
+		QTimer::singleShot(100, this, &OBSBasic::ReconcileStreamingStop);
 	}
 }
 

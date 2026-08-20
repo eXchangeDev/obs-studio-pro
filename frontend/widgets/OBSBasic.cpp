@@ -254,6 +254,7 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	api = InitializeAPIInterface(this);
 
 	ui->setupUi(this);
+	InitializeCanvasTabs();
 	ui->previewDisabledWidget->setVisible(false);
 
 	/* Set up streaming connections */
@@ -402,7 +403,7 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	auto displayResize = [this]() {
 		struct obs_video_info ovi;
 
-		if (obs_get_video_info(&ovi)) {
+		if (GetActiveCanvasVideoInfo(&ovi)) {
 			ResizePreview(ovi.base_width, ovi.base_height);
 		}
 
@@ -744,6 +745,8 @@ bool OBSBasic::InitBasicConfigDefaults()
 
 	config_set_default_bool(activeConfiguration, "Stream1", "IgnoreRecommended", false);
 	config_set_default_bool(activeConfiguration, "Stream1", "EnableMultitrackVideo", false);
+	config_set_default_string(activeConfiguration, "Stream1", "OutputRoutes", "");
+	config_set_default_string(activeConfiguration, "Stream1", "PlatformSessions", "");
 	config_set_default_bool(activeConfiguration, "Stream1", "MultitrackVideoMaximumAggregateBitrateAuto", true);
 	config_set_default_bool(activeConfiguration, "Stream1", "MultitrackVideoMaximumVideoTracksAuto", true);
 
@@ -1145,6 +1148,10 @@ void OBSBasic::OBSInit()
 	}
 
 	loaded = true;
+	for (const OBS::Canvas &canvas : canvases) {
+		InitializeCanvasSceneSets(canvas, false, false);
+	}
+	RefreshCanvasTabs();
 
 	previewEnabled = config_get_bool(App()->GetUserConfig(), "BasicWindow", "PreviewEnabled");
 
@@ -1161,7 +1168,7 @@ void OBSBasic::OBSInit()
 		obs_display_add_draw_callback(window->GetDisplay(), OBSBasic::RenderMain, this);
 
 		struct obs_video_info ovi;
-		if (obs_get_video_info(&ovi)) {
+		if (GetActiveCanvasVideoInfo(&ovi)) {
 			ResizePreview(ovi.base_width, ovi.base_height);
 		}
 	};

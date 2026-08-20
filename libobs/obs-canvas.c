@@ -19,6 +19,8 @@
 #include "obs-internal.h"
 #include "obs-scene.h"
 
+#include <string.h>
+
 /* The primary canvas has static name/uuid. */
 static const char *MAIN_CANVAS_NAME = "Main";
 static const char *MAIN_CANVAS_UUID = "6c69626f-6273-4c00-9d88-c5136d61696e";
@@ -234,6 +236,53 @@ void obs_canvas_destroy(obs_canvas_t *canvas)
 
 /*** Saving / Loading ***/
 
+static void save_canvas_video_info(obs_data_t *canvas_data, const struct obs_video_info *ovi)
+{
+	if (!ovi)
+		return;
+
+	obs_data_t *video_info = obs_data_create();
+	obs_data_set_int(video_info, "fps_num", ovi->fps_num);
+	obs_data_set_int(video_info, "fps_den", ovi->fps_den);
+	obs_data_set_int(video_info, "base_width", ovi->base_width);
+	obs_data_set_int(video_info, "base_height", ovi->base_height);
+	obs_data_set_int(video_info, "output_width", ovi->output_width);
+	obs_data_set_int(video_info, "output_height", ovi->output_height);
+	obs_data_set_int(video_info, "output_format", ovi->output_format);
+	obs_data_set_int(video_info, "adapter", ovi->adapter);
+	obs_data_set_bool(video_info, "gpu_conversion", ovi->gpu_conversion);
+	obs_data_set_int(video_info, "colorspace", ovi->colorspace);
+	obs_data_set_int(video_info, "range", ovi->range);
+	obs_data_set_int(video_info, "scale_type", ovi->scale_type);
+	obs_data_set_obj(canvas_data, "video_info", video_info);
+	obs_data_release(video_info);
+}
+
+static bool load_canvas_video_info(obs_data_t *canvas_data, struct obs_video_info *ovi)
+{
+	obs_data_t *video_info = obs_data_get_obj(canvas_data, "video_info");
+	if (!video_info)
+		return false;
+
+	memset(ovi, 0, sizeof(*ovi));
+	ovi->fps_num = (uint32_t)obs_data_get_int(video_info, "fps_num");
+	ovi->fps_den = (uint32_t)obs_data_get_int(video_info, "fps_den");
+	ovi->base_width = (uint32_t)obs_data_get_int(video_info, "base_width");
+	ovi->base_height = (uint32_t)obs_data_get_int(video_info, "base_height");
+	ovi->output_width = (uint32_t)obs_data_get_int(video_info, "output_width");
+	ovi->output_height = (uint32_t)obs_data_get_int(video_info, "output_height");
+	ovi->output_format = (enum video_format)obs_data_get_int(video_info, "output_format");
+	ovi->adapter = (uint32_t)obs_data_get_int(video_info, "adapter");
+	ovi->gpu_conversion = obs_data_get_bool(video_info, "gpu_conversion");
+	ovi->colorspace = (enum video_colorspace)obs_data_get_int(video_info, "colorspace");
+	ovi->range = (enum video_range_type)obs_data_get_int(video_info, "range");
+	ovi->scale_type = (enum obs_scale_type)obs_data_get_int(video_info, "scale_type");
+	obs_data_release(video_info);
+
+	return ovi->fps_num && ovi->fps_den && ovi->base_width && ovi->base_height && ovi->output_width &&
+	       ovi->output_height && ovi->output_format != VIDEO_FORMAT_NONE;
+}
+
 obs_data_t *obs_save_canvas(obs_canvas_t *canvas)
 {
 	if (canvas->flags & (EPHEMERAL | REMOVED))
@@ -245,6 +294,8 @@ obs_data_t *obs_save_canvas(obs_canvas_t *canvas)
 	obs_data_set_string(canvas_data, "uuid", canvas->context.uuid);
 	obs_data_set_bool(canvas_data, "private", canvas->context.private);
 	obs_data_set_int(canvas_data, "flags", canvas->flags);
+	if (obs_canvas_has_valid_video_info(canvas))
+		save_canvas_video_info(canvas_data, &canvas->ovi);
 
 	return canvas_data;
 }
@@ -257,7 +308,11 @@ obs_canvas_t *obs_load_canvas(obs_data_t *data)
 	uint32_t flags = (uint32_t)obs_data_get_int(data, "flags");
 
 	flags &= ~MAIN; /* Prevent user from creating a MAIN canvas. */
-	return obs_canvas_create_internal(name, uuid, NULL, flags, private);
+	obs_canvas_t *canvas = obs_canvas_create_internal(name, uuid, NULL, flags, private);
+	if (canvas)
+		load_canvas_video_info(data, &canvas->ovi);
+
+	return canvas;
 }
 
 /*** Internal API ***/
@@ -407,6 +462,21 @@ bool obs_canvas_reset_video(obs_canvas_t *canvas, struct obs_video_info *ovi)
 		return false;
 
 	return obs_canvas_reset_video_internal(canvas, ovi);
+}
+
+bool obs_canvas_set_video_info(obs_canvas_t *canvas, const struct obs_video_info *ovi)
+{
+	if (!canvas || !ovi || canvas->flags & MAIN)
+		return false;
+
+	if (obs_video_active()) {
+		/* The next global video reset recreates this canvas's mix from canvas->ovi. */
+		canvas->ovi = *ovi;
+		return true;
+	}
+
+	struct obs_video_info next = *ovi;
+	return obs_canvas_reset_video_internal(canvas, &next);
 }
 
 video_t *obs_canvas_get_video(const obs_canvas_t *canvas)
