@@ -89,22 +89,50 @@ QString NewId()
 	return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
 
-void AddBeforeVerticalSpacer(QVBoxLayout *layout, QWidget *widget)
+bool InsertBeforeVerticalSpacer(QLayout *layout, QWidget *widget)
 {
 	if (!layout || !widget) {
-		return;
+		return false;
 	}
 
 	for (int index = 0; index < layout->count(); ++index) {
 		QLayoutItem *item = layout->itemAt(index);
 		if (item && item->spacerItem() &&
 		    item->spacerItem()->sizePolicy().verticalPolicy() == QSizePolicy::Expanding) {
-			layout->insertWidget(index, widget);
-			return;
+			if (auto *boxLayout = qobject_cast<QBoxLayout *>(layout)) {
+				boxLayout->insertWidget(index, widget);
+				return true;
+			}
+		}
+		if (item && item->layout() && InsertBeforeVerticalSpacer(item->layout(), widget)) {
+			return true;
 		}
 	}
 
-	layout->addWidget(widget);
+	return false;
+}
+
+void AddBeforeVerticalSpacer(QLayout *layout, QWidget *widget)
+{
+	if (!InsertBeforeVerticalSpacer(layout, widget)) {
+		if (auto *boxLayout = qobject_cast<QBoxLayout *>(layout)) {
+			boxLayout->addWidget(widget);
+		}
+	}
+}
+
+void ConfigureSettingsGroup(QGroupBox *group)
+{
+	if (!group) {
+		return;
+	}
+
+	group->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+	if (QLayout *layout = group->layout()) {
+		layout->setSizeConstraint(QLayout::SetMinimumSize);
+		layout->activate();
+	}
+	group->setMinimumHeight(group->sizeHint().height());
 }
 
 void ConfigureEmbeddedPropertiesView(OBSPropertiesView *view)
@@ -417,7 +445,6 @@ struct OBSOutputRoutesSettings::Impl {
 		QLineEdit *name = nullptr;
 		QComboBox *session = nullptr;
 		QComboBox *output = nullptr;
-		QComboBox *serviceType = nullptr;
 		QSpinBox *priority = nullptr;
 		QCheckBox *dynamicBitrate = nullptr;
 		QVBoxLayout *propertiesLayout = nullptr;
@@ -994,26 +1021,6 @@ struct OBSOutputRoutesSettings::Impl {
 		combo->setCurrentIndex(selectedIndex >= 0 ? selectedIndex : 0);
 	}
 
-	void PopulateServiceCombo(QComboBox *combo, const std::string &selected)
-	{
-		QSignalBlocker blocker(combo);
-		combo->clear();
-		const char *id = nullptr;
-		for (size_t index = 0; obs_enum_service_types(index, &id); ++index) {
-			OBSProperties properties = obs_get_service_properties(id);
-			if (!properties) {
-				continue;
-			}
-			combo->addItem(QString::fromUtf8(obs_service_get_display_name(id)), QString::fromUtf8(id));
-		}
-		combo->model()->sort(0);
-		int selectedIndex = combo->findData(QString::fromUtf8(selected.c_str()));
-		if (selectedIndex < 0) {
-			selectedIndex = combo->findData(QStringLiteral("rtmp_common"));
-		}
-		combo->setCurrentIndex(std::max(0, selectedIndex));
-	}
-
 	void PopulateSessionCombo(QComboBox *combo, const Destination &destination, std::string_view programId)
 	{
 		QSignalBlocker blocker(combo);
@@ -1056,9 +1063,6 @@ struct OBSOutputRoutesSettings::Impl {
 			session->enabled = ui.enabled->isChecked();
 			session->name = destination->name;
 			session->dynamicBitrateEnabled = destination->dynamicBitrateEnabled;
-		}
-		if (ui.serviceType) {
-			destination->service = ToStdString(ui.serviceType->currentData().toString());
 		}
 		if (ui.properties) {
 			obs_data_t *settings = ui.properties->GetSettings();
@@ -1103,6 +1107,10 @@ struct OBSOutputRoutesSettings::Impl {
 						      (PropertiesReloadCallback)obs_get_service_properties, 170);
 		ConfigureEmbeddedPropertiesView(ui.properties);
 		ui.propertiesLayout->addWidget(ui.properties);
+		if (auto *propertiesGroup = qobject_cast<QGroupBox *>(ui.propertiesLayout->parentWidget())) {
+			QObject::connect(ui.properties, &OBSPropertiesView::PropertiesRefreshed, propertiesGroup,
+					 [propertiesGroup]() { ConfigureSettingsGroup(propertiesGroup); });
+		}
 		QObject::connect(ui.properties, &OBSPropertiesView::Changed, ui.page, [this]() { MarkChanged(); });
 	}
 
@@ -1164,10 +1172,16 @@ struct OBSOutputRoutesSettings::Impl {
 			contents = page.Contents();
 			layout = page.Layout();
 		}
-		auto *settings = new QGroupBox(primary ? QTStr("OBSPro.Settings.Session.Controls")
-						       : QTStr("Basic.Settings.Stream.Destination"),
-					       contents);
-		settings->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+		if (!primary) {
+			auto *properties = new QGroupBox(QTStr("Basic.Settings.Stream.Destination"), contents);
+			ConfigureSettingsGroup(properties);
+			ui->propertiesLayout = new QVBoxLayout(properties);
+			ui->propertiesLayout->setContentsMargins(9, 2, 9, 9);
+			layout->addWidget(properties);
+		}
+
+		auto *settings = new QGroupBox(QTStr("OBSPro.Settings.Session.Controls"), contents);
+		ConfigureSettingsGroup(settings);
 		auto *form = new QFormLayout(settings);
 		OBSNativeSettingsPage::ConfigureForm(form);
 		layout->addWidget(settings);
@@ -1187,12 +1201,6 @@ struct OBSOutputRoutesSettings::Impl {
 		ui->output->setEnabled(!primary);
 		OBSNativeSettingsPage::AddRow(form, settings, QTStr("OBSPro.Settings.Stream.EncodedOutput"),
 					      ui->output);
-		if (!primary) {
-			ui->serviceType = new QComboBox(settings);
-			PopulateServiceCombo(ui->serviceType, destination.service);
-			OBSNativeSettingsPage::AddRow(form, settings, QTStr("Basic.AutoConfig.StreamPage.Service"),
-						      ui->serviceType);
-		}
 		ui->priority = new QSpinBox(settings);
 		ui->priority->setRange(0, 999);
 		ui->priority->setValue(static_cast<int>(destination.priority));
@@ -1201,14 +1209,8 @@ struct OBSOutputRoutesSettings::Impl {
 		ui->dynamicBitrate->setChecked(session ? session->dynamicBitrateEnabled
 						       : destination.dynamicBitrateEnabled);
 		OBSNativeSettingsPage::AddRow(form, settings, QString(), ui->dynamicBitrate);
+		ConfigureSettingsGroup(settings);
 
-		if (!primary) {
-			auto *properties = new QGroupBox(QTStr("OBSPro.Settings.Stream.ServiceSettings"), contents);
-			properties->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
-			ui->propertiesLayout = new QVBoxLayout(properties);
-			ui->propertiesLayout->setContentsMargins(9, 2, 9, 9);
-			layout->addWidget(properties);
-		}
 		layout->addStretch();
 		auto *sessionControls = new QWidget(contents);
 		auto *sessionControlsLayout = new QHBoxLayout(sessionControls);
@@ -1271,20 +1273,6 @@ struct OBSOutputRoutesSettings::Impl {
 			RefreshAssignedDestinationLabels();
 			MarkChanged();
 		});
-		if (ui->serviceType) {
-			QObject::connect(ui->serviceType, &QComboBox::currentIndexChanged, ui->page, [this, raw](int) {
-				auto [currentRoute, current] = FindDestination(raw->id);
-				if (!currentRoute || !current) {
-					return;
-				}
-				current->service = ToStdString(raw->serviceType->currentData().toString());
-				current->serviceSettingsJson.clear();
-				current->server.clear();
-				current->streamKey.clear();
-				CreateServiceProperties(*raw);
-				MarkChanged();
-			});
-		}
 		QObject::connect(remove, &QPushButton::clicked, ui->page,
 				 [this, id = ui->id]() { RemoveDestination(id); });
 		QObject::connect(start, &QPushButton::clicked, ui->page, [this, raw]() {
@@ -1422,6 +1410,9 @@ struct OBSOutputRoutesSettings::Impl {
 						     ui.videoBitrateOverride),
 					     ui.videoBitrateOverride);
 				layout->addLayout(form);
+				if (auto *group = qobject_cast<QGroupBox *>(layout->parentWidget())) {
+					ConfigureSettingsGroup(group);
+				}
 				QObject::connect(ui.videoBitrateOverride, &QSpinBox::valueChanged, ui.page,
 						 [this](int) { MarkChanged(); });
 			}
@@ -1433,6 +1424,10 @@ struct OBSOutputRoutesSettings::Impl {
 					     (PropertiesReloadCallback)obs_get_encoder_properties, 170);
 		ConfigureEmbeddedPropertiesView(view);
 		layout->addWidget(view);
+		if (auto *group = qobject_cast<QGroupBox *>(layout->parentWidget())) {
+			QObject::connect(view, &OBSPropertiesView::PropertiesRefreshed, group,
+					 [group]() { ConfigureSettingsGroup(group); });
+		}
 		QObject::connect(view, &OBSPropertiesView::Changed, ui.page, [this]() { MarkChanged(); });
 	}
 
@@ -1481,7 +1476,7 @@ struct OBSOutputRoutesSettings::Impl {
 			QWidget *contents = page.Contents();
 			auto *contentsLayout = page.Layout();
 			auto *settings = new QGroupBox(QTStr("Basic.Settings.Output.Adv.Streaming.Settings"), contents);
-			settings->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+			ConfigureSettingsGroup(settings);
 			auto *form = new QFormLayout(settings);
 			OBSNativeSettingsPage::ConfigureForm(form);
 			contentsLayout->addWidget(settings);
@@ -1524,16 +1519,17 @@ struct OBSOutputRoutesSettings::Impl {
 				std::max(0, ui->failoverMode->findData(static_cast<int>(route.failoverMode))));
 			OBSNativeSettingsPage::AddRow(form, settings, QTStr("OBSPro.Settings.Output.DeliveryMode"),
 						      ui->failoverMode);
+			ConfigureSettingsGroup(settings);
 
 			auto *videoGroup =
 				new QGroupBox(QTStr("OBSPro.Settings.Output.VideoEncoderSettings"), contents);
-			videoGroup->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+			ConfigureSettingsGroup(videoGroup);
 			ui->videoPropertiesLayout = new QVBoxLayout(videoGroup);
 			ui->videoPropertiesLayout->setContentsMargins(8, 2, 8, 8);
 			contentsLayout->addWidget(videoGroup);
 			auto *audioGroup =
 				new QGroupBox(QTStr("OBSPro.Settings.Output.AudioEncoderSettings"), contents);
-			audioGroup->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+			ConfigureSettingsGroup(audioGroup);
 			ui->audioPropertiesLayout = new QVBoxLayout(audioGroup);
 			ui->audioPropertiesLayout->setContentsMargins(8, 2, 8, 8);
 			contentsLayout->addWidget(audioGroup);
