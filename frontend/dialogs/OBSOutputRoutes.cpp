@@ -1414,7 +1414,7 @@ struct OBSOutputRoutesSettings::Impl {
 		route->audioEncoderId = ToStdString(ui.audioEncoder->currentData().toString());
 		route->rescaleFilter = ui.rescaleFilter ? ui.rescaleFilter->currentData().toInt() : OBS_SCALE_DISABLE;
 		route->rescaleResolution = ui.rescaleResolution ? ToStdString(ui.rescaleResolution->currentText())
-										: std::string{};
+								: std::string{};
 		if (ui.videoBitrateOverride) {
 			route->videoBitrateOverride = static_cast<uint32_t>(ui.videoBitrateOverride->value());
 		}
@@ -1555,7 +1555,8 @@ struct OBSOutputRoutesSettings::Impl {
 				button->setChecked(route.audioMix == static_cast<uint32_t>(mix));
 			}
 			audioTracksLayout->addStretch();
-			OBSNativeSettingsPage::AddRow(form, settings, QTStr("Basic.Settings.Output.Adv.AudioTrack"), audioTracks);
+			OBSNativeSettingsPage::AddRow(form, settings, QTStr("Basic.Settings.Output.Adv.AudioTrack"),
+						      audioTracks);
 
 			ui->audioEncoder = new QComboBox(settings);
 			PopulateEncoderCombo(ui->audioEncoder, OBS_ENCODER_AUDIO, route.audioEncoderId);
@@ -1592,16 +1593,17 @@ struct OBSOutputRoutesSettings::Impl {
 				PopulateCanvasResolutionCombo(ui->rescaleResolution, routeVideoInfo, false);
 			}
 			if (!route.rescaleResolution.empty()) {
-				ui->rescaleResolution->setCurrentText(QString::fromUtf8(route.rescaleResolution.c_str()));
+				ui->rescaleResolution->setCurrentText(
+					QString::fromUtf8(route.rescaleResolution.c_str()));
 			}
 			const int rescaleIndex = ui->rescaleFilter->findData(route.rescaleFilter);
 			ui->rescaleFilter->setCurrentIndex(rescaleIndex >= 0 ? rescaleIndex : 0);
 			ui->rescaleResolution->setEnabled(route.rescaleFilter != OBS_SCALE_DISABLE);
-			OBSNativeSettingsPage::AddRow(form, settings, QTStr("Basic.Settings.Output.Adv.Rescale"), rescale);
+			OBSNativeSettingsPage::AddRow(form, settings, QTStr("Basic.Settings.Output.Adv.Rescale"),
+						      rescale);
 			ConfigureSettingsGroup(settings);
 
-			auto *videoGroup =
-				new QGroupBox(QTStr("Basic.Settings.Output.Adv.Encoder"), contents);
+			auto *videoGroup = new QGroupBox(QTStr("Basic.Settings.Output.Adv.Encoder"), contents);
 			ConfigureSettingsGroup(videoGroup);
 			ui->videoPropertiesLayout = new QVBoxLayout(videoGroup);
 			ui->videoPropertiesLayout->setContentsMargins(8, 2, 8, 8);
@@ -1615,8 +1617,7 @@ struct OBSOutputRoutesSettings::Impl {
 			ConfigureSettingsGroup(audioGroup);
 			contentsLayout->addWidget(audioGroup);
 
-			auto *routeSettings =
-				new QGroupBox(QTStr("OBSPro.Settings.Output.RouteSettings"), contents);
+			auto *routeSettings = new QGroupBox(QTStr("OBSPro.Settings.Output.RouteSettings"), contents);
 			ConfigureSettingsGroup(routeSettings);
 			auto *routeForm = new QFormLayout(routeSettings);
 			OBSNativeSettingsPage::ConfigureForm(routeForm);
@@ -1624,10 +1625,12 @@ struct OBSOutputRoutesSettings::Impl {
 			ui->enabled->setChecked(route.enabled);
 			OBSNativeSettingsPage::AddRow(routeForm, routeSettings, QString(), ui->enabled);
 			ui->name = new QLineEdit(QString::fromUtf8(route.name.c_str()), routeSettings);
-			OBSNativeSettingsPage::AddRow(routeForm, routeSettings, QTStr("OBSPro.OutputRoutes.Name"), ui->name);
+			OBSNativeSettingsPage::AddRow(routeForm, routeSettings, QTStr("OBSPro.OutputRoutes.Name"),
+						      ui->name);
 			ui->canvas = new QComboBox(routeSettings);
 			PopulateCanvasCombo(ui->canvas, route.canvas);
-			OBSNativeSettingsPage::AddRow(routeForm, routeSettings, QTStr("OBSPro.OutputRoutes.Canvas"), ui->canvas);
+			OBSNativeSettingsPage::AddRow(routeForm, routeSettings, QTStr("OBSPro.OutputRoutes.Canvas"),
+						      ui->canvas);
 			ui->failoverMode = new QComboBox(routeSettings);
 			ui->failoverMode->addItem(QTStr("OBSPro.Settings.Output.Parallel"),
 						  static_cast<int>(FailoverMode::ClientParallel));
@@ -1635,8 +1638,8 @@ struct OBSOutputRoutesSettings::Impl {
 						  static_cast<int>(FailoverMode::ClientSequential));
 			ui->failoverMode->setCurrentIndex(
 				std::max(0, ui->failoverMode->findData(static_cast<int>(route.failoverMode))));
-			OBSNativeSettingsPage::AddRow(routeForm, routeSettings, QTStr("OBSPro.Settings.Output.DeliveryMode"),
-						      ui->failoverMode);
+			OBSNativeSettingsPage::AddRow(routeForm, routeSettings,
+						      QTStr("OBSPro.Settings.Output.DeliveryMode"), ui->failoverMode);
 			ConfigureSettingsGroup(routeSettings);
 			contentsLayout->addWidget(routeSettings);
 
@@ -1665,21 +1668,21 @@ struct OBSOutputRoutesSettings::Impl {
 			});
 			QObject::connect(ui->audioMix, &QButtonGroup::idClicked, ui->page,
 					 [this](int) { MarkChanged(); });
-			QObject::connect(ui->rescaleFilter, &QComboBox::currentIndexChanged, ui->page,
-					 [this, raw](int) {
-						if (Route *route = FindRoute(raw->id)) {
-							route->rescaleFilter = raw->rescaleFilter->currentData().toInt();
-						}
-						raw->rescaleResolution->setEnabled(raw->rescaleFilter->currentData().toInt() !=
-										OBS_SCALE_DISABLE);
-						MarkChanged();
-					 });
+			QObject::connect(
+				ui->rescaleFilter, &QComboBox::currentIndexChanged, ui->page, [this, raw](int) {
+					if (Route *route = FindRoute(raw->id)) {
+						route->rescaleFilter = raw->rescaleFilter->currentData().toInt();
+					}
+					raw->rescaleResolution->setEnabled(raw->rescaleFilter->currentData().toInt() !=
+									   OBS_SCALE_DISABLE);
+					MarkChanged();
+				});
 			QObject::connect(ui->rescaleResolution, &QComboBox::currentTextChanged, ui->page,
 					 [this, raw](const QString &text) {
-						if (Route *route = FindRoute(raw->id)) {
-							route->rescaleResolution = ToStdString(text.trimmed());
-						}
-						MarkChanged();
+						 if (Route *route = FindRoute(raw->id)) {
+							 route->rescaleResolution = ToStdString(text.trimmed());
+						 }
+						 MarkChanged();
 					 });
 			QObject::connect(ui->failoverMode, &QComboBox::currentIndexChanged, ui->page,
 					 [this](int) { MarkChanged(); });
