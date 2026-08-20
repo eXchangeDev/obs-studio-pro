@@ -92,6 +92,10 @@ struct Route {
 	std::string audioEncoderId;
 	std::string videoEncoderSettingsJson;
 	std::string audioEncoderSettingsJson;
+	// Per-route output scaling mirrors OBS' native Advanced Output > Stream
+	// controls.  OBS_SCALE_DISABLE keeps the selected canvas resolution.
+	int rescaleFilter = OBS_SCALE_DISABLE;
+	std::string rescaleResolution;
 	// A zero value inherits the primary encoder bitrate.  A non-zero value
 	// overrides only the bitrate while keeping the inherited encoder type.
 	uint32_t videoBitrateOverride = 0;

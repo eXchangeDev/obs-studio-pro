@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <cstring>
 #include <mutex>
 #include <unordered_map>
@@ -54,6 +55,23 @@ void ApplyJsonSettings(obs_data_t *settings, const std::string &serialized)
 	if (overrides) {
 		obs_data_apply(settings, overrides);
 	}
+}
+
+bool ParseResolution(std::string_view value, uint32_t &width, uint32_t &height)
+{
+	const size_t separator = value.find_first_of("xX");
+	if (separator == std::string_view::npos || separator == 0 || separator + 1 >= value.size()) {
+		return false;
+	}
+
+	const auto parse = [](std::string_view input, uint32_t &result) {
+		const auto begin = input.data();
+		const auto end = begin + input.size();
+		const auto [parsedEnd, error] = std::from_chars(begin, end, result);
+		return error == std::errc{} && parsedEnd == end && result >= 32 && result <= 16384;
+	};
+
+	return parse(value.substr(0, separator), width) && parse(value.substr(separator + 1), height);
 }
 
 OBSEncoderAutoRelease CreateVideoEncoder(const Route &route, obs_canvas_t *canvas, obs_encoder_t *reference,
@@ -103,6 +121,16 @@ OBSEncoderAutoRelease CreateVideoEncoder(const Route &route, obs_canvas_t *canva
 	}
 
 	obs_encoder_set_video(encoder, video);
+	if (route.rescaleFilter != OBS_SCALE_DISABLE) {
+		uint32_t width = 0;
+		uint32_t height = 0;
+		if (!ParseResolution(route.rescaleResolution, width, height)) {
+			error = "route output rescale resolution is invalid";
+			return nullptr;
+		}
+		obs_encoder_set_scaled_size(encoder, width, height);
+		obs_encoder_set_gpu_scale_type(encoder, static_cast<obs_scale_type>(route.rescaleFilter));
+	}
 	obs_video_info videoInfo{};
 	obs_canvas_get_video_info(canvas, &videoInfo);
 	blog(LOG_INFO,

@@ -309,6 +309,8 @@ SessionSet MigrateRouteSet(const RouteSet &routes)
 		program.audioEncoderId = route.audioEncoderId;
 		program.videoEncoderSettingsJson = route.videoEncoderSettingsJson;
 		program.audioEncoderSettingsJson = route.audioEncoderSettingsJson;
+		program.rescaleFilter = route.rescaleFilter;
+		program.rescaleResolution = route.rescaleResolution;
 		program.audioMix = route.audioMix;
 		program.enabled = route.enabled;
 		program.compatibilityDefault = route.primary;
@@ -490,6 +492,8 @@ RouteSet ToRouteSet(const SessionSet &set)
 		route.audioEncoderId = program.audioEncoderId;
 		route.videoEncoderSettingsJson = program.videoEncoderSettingsJson;
 		route.audioEncoderSettingsJson = program.audioEncoderSettingsJson;
+		route.rescaleFilter = program.rescaleFilter;
+		route.rescaleResolution = program.rescaleResolution;
 		route.audioMix = program.audioMix;
 		route.enabled = program.enabled;
 		route.primary = program.compatibilityDefault;
@@ -563,6 +567,8 @@ void to_json(json &value, const Program &program)
 		     {"audio_encoder_id", program.audioEncoderId},
 		     {"video_encoder_settings", program.videoEncoderSettingsJson},
 		     {"audio_encoder_settings", program.audioEncoderSettingsJson},
+		     {"rescale_filter", program.rescaleFilter},
+		     {"rescale_resolution", program.rescaleResolution},
 		     {"audio_mix", program.audioMix},
 		     {"enabled", program.enabled},
 		     {"compatibility_default", program.compatibilityDefault},
@@ -588,6 +594,8 @@ void from_json(const json &value, Program &program)
 	program.audioEncoderId = value.value("audio_encoder_id", std::string{});
 	program.videoEncoderSettingsJson = value.value("video_encoder_settings", std::string{});
 	program.audioEncoderSettingsJson = value.value("audio_encoder_settings", std::string{});
+	program.rescaleFilter = value.value("rescale_filter", OBS_SCALE_DISABLE);
+	program.rescaleResolution = value.value("rescale_resolution", std::string{});
 	program.audioMix = value.value("audio_mix", 0U);
 	program.enabled = value.value("enabled", true);
 	program.compatibilityDefault = value.value("compatibility_default", false);

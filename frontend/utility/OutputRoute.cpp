@@ -283,6 +283,8 @@ void to_json(json &value, const Route &route)
 		     {"audio_encoder_id", route.audioEncoderId},
 		     {"video_encoder_settings", route.videoEncoderSettingsJson},
 		     {"audio_encoder_settings", route.audioEncoderSettingsJson},
+		     {"rescale_filter", route.rescaleFilter},
+		     {"rescale_resolution", route.rescaleResolution},
 		     {"video_bitrate_override", route.videoBitrateOverride},
 		     {"audio_mix", route.audioMix},
 		     {"failover_mode", ToString(route.failoverMode)},
@@ -301,6 +303,8 @@ void from_json(const json &value, Route &route)
 	route.audioEncoderId = value.value("audio_encoder_id", std::string{});
 	route.videoEncoderSettingsJson = value.value("video_encoder_settings", std::string{});
 	route.audioEncoderSettingsJson = value.value("audio_encoder_settings", std::string{});
+	route.rescaleFilter = value.value("rescale_filter", OBS_SCALE_DISABLE);
+	route.rescaleResolution = value.value("rescale_resolution", std::string{});
 	route.videoBitrateOverride = value.value("video_bitrate_override", 0U);
 	route.audioMix = value.value("audio_mix", 0U);
 	route.failoverMode = FailoverModeFromString(value.value("failover_mode", std::string{"none"}));

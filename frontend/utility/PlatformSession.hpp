@@ -74,6 +74,8 @@ struct Program {
 	std::string audioEncoderId;
 	std::string videoEncoderSettingsJson;
 	std::string audioEncoderSettingsJson;
+	int rescaleFilter = OBS_SCALE_DISABLE;
+	std::string rescaleResolution;
 	uint32_t audioMix = 0;
 	bool enabled = true;
 	bool compatibilityDefault = false;

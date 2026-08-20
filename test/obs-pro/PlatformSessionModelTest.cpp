@@ -32,6 +32,8 @@ int main()
 	youtube.canvas.uuid = "horizontal-canvas";
 	youtube.videoEncoderSettingsJson = R"({"bitrate":50000})";
 	youtube.audioEncoderSettingsJson = R"({"bitrate":320})";
+	youtube.rescaleFilter = OBS_SCALE_LANCZOS;
+	youtube.rescaleResolution = "3840x2160";
 	youtube.destinations.emplace_back(youtubeEndpoint);
 
 	OBS::Output::RouteSet routes;
@@ -78,6 +80,8 @@ int main()
 	CHECK(projected.routes[1].destinations[0].sessionId == "youtube-session");
 	CHECK(projected.routes[1].destinations[0].dynamicBitrateEnabled);
 	CHECK(projected.routes[1].destinations[0].serviceSettingsJson == youtubeEndpoint.serviceSettingsJson);
+	CHECK(projected.routes[1].rescaleFilter == OBS_SCALE_LANCZOS);
+	CHECK(projected.routes[1].rescaleResolution == "3840x2160");
 
 	restored.sessions[1].enabled = false;
 	const auto disabledProjection = OBS::Output::ToRouteSet(restored);
